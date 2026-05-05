@@ -17,6 +17,7 @@ from src.steps.data_loader import DataLoaderStep
 from src.steps.data_processor import DataProcessorStep
 from src.steps.model_step import ModelStep
 from src.steps.wavelet_separation import WaveletSeparationStep
+from src.steps.feature_extract_step import FeatureExtractStep
 
 def run_workflow(config_path: str):
     """
@@ -40,6 +41,22 @@ def run_workflow(config_path: str):
     if config['steps'].get('wavelet_separation', {}).get('enabled', True):
         is_shape_dtw = config['steps']['wavelet_separation'].get('is_shape_dtw', False)
         wf.add_step(WaveletSeparationStep("WaveletSeparation", is_shape_dtw=is_shape_dtw))
+
+    if config['steps'].get('feature_extract', {}).get('enabled', True):
+        extract_config = config['steps']['feature_extract']
+        wf.add_step(FeatureExtractStep(
+            name="FeatureExtract",
+            model_name=extract_config.get('model_name', 'bilstm_ae'),
+            latent_dim=extract_config.get('latent_dim', 64),
+            epochs=extract_config.get('epochs', 50),
+            batch_size=extract_config.get('batch_size', 32),
+            learning_rate=extract_config.get('learning_rate', 0.001),
+            patience=extract_config.get('patience', 5),
+            attention_size=extract_config.get('attention_size', 32)
+        ))
+    
+    if config['steps'].get('cluster', {}).get('enabled', True):
+        wf.add_step(ClusterStep("ClusterStep"))
 
     if config['steps']['model_training'].get('enabled', True):
         wf.add_step(ModelStep("ModelStep"))

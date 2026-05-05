@@ -2,7 +2,7 @@
 
 # General workflow settings
 workflow:
-  name: "MachineLearningWorkflow"
+  name: "Primitive State Segmentation and Clustering"
   description: "Standard ML workflow for processing and training on input data."
 
 # Step-specific configurations
@@ -25,6 +25,27 @@ steps:
     enabled: true
     model_name: "DummyModel"
     task: "train_and_predict"
+  
+  time_clustering:
+    enabled: true
+    data_path: ""
+    feature_path: ""
+    seq_len_path: ""
+    eps: 1.25
+    min_pts: 20
+    metric: "euclidean"
+    normalization_method: "zscore"
+    col_index: 2
+  
+  feature_extract:
+    enabled: true
+    model_name: "bilstm_ae"
+    latent_dim: 64
+    epochs: 50
+    batch_size: 32
+    learning_rate: 0.001
+    patience: 5
+    attention_size: 32
 
 # Model hyperparameters
 models:
