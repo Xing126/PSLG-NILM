@@ -4,42 +4,29 @@
 workflow:
   name: "Primitive State Segmentation and Clustering"
   description: "Standard ML workflow for processing and training on input data."
+  appliance_name: "dishwasher" 
 
 # Step-specific configurations
 steps:
   data_loader:
-    enabled: true
+    enabled: false
     input_folder: "input"
     supported_formats: [".npy", ".txt"]
     
   data_processor:
-    enabled: true
+    enabled: false
     normalization: true
     save_figures: true
 
   wavelet_separation:
-    enabled: true
+    enabled: false
     is_shape_dtw: false
     plot_count: 0
-    
-  model_training:
-    enabled: true
-    model_name: "DummyModel"
-    task: "train_and_predict"
-  
-  time_clustering:
-    enabled: true
-    data_path: ""
-    feature_path: ""
-    seq_len_path: ""
-    eps: 1.25
-    min_pts: 20
-    metric: "euclidean"
-    normalization_method: "zscore"
-    col_index: 2
-  
+
   feature_extract:
-    enabled: true
+    enabled: false
+    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\data_fusion.npy"
+    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\seq_length_fusion.npy"
     model_name: "bilstm_ae"
     latent_dim: 64
     epochs: 50
@@ -47,6 +34,18 @@ steps:
     learning_rate: 0.001
     patience: 5
     attention_size: 32
+  
+  time_clustering:
+    enabled: true
+    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\data_fusion.npy"
+    feature_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\dishwasher_20260507_023549\\FeatureExtract\\extracted_features\\bilstm_ae_file_64dim.npy"
+    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\seq_length_fusion.npy"
+    eps: 1.0
+    min_pts: 20
+    metric: "euclidean"
+    normalization_method: "zscore"
+    col_index: 2
+  
 
 # Model hyperparameters
 models:

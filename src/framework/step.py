@@ -4,9 +4,12 @@ import os
 class Step(ABC):
     """
     Abstract base class for all workflow steps.
+    
+    Provides default implementation for get_log_dir that supports appliance_name.
     """
     def __init__(self, name: str):
         self.name = name
+        self.appliance_name = ""  # Default empty, can be set by subclasses
 
     @abstractmethod
     def run(self, context: dict) -> dict:
@@ -22,7 +25,25 @@ class Step(ABC):
         pass
 
     def get_log_dir(self, context: dict) -> str:
-        """Helper to get the specific log directory for this step."""
-        log_dir = os.path.join(context['log_root'], self.name)
-        os.makedirs(log_dir, exist_ok=True)
-        return log_dir
+        """
+        Get the specific log directory for this step, optionally with appliance name.
+        
+        Supports appliance_name for organizing logs by device type:
+        - With appliance_name: log/{appliance_name}_{sequence_id}/{step_name}/
+        - Without appliance_name: log/{sequence_id}/{step_name}/
+        
+        Args:
+            context (dict): Shared context containing sequence_id and log_root
+            
+        Returns:
+            str: Path to step's log directory
+        """
+        if self.appliance_name:
+            sequence_id = context.get('sequence_id', '')
+            log_root = os.path.join('log', f"{self.appliance_name}_{sequence_id}")
+        else:
+            log_root = context.get('log_root', os.path.join('log', 'default'))
+        
+        step_log_dir = os.path.join(log_root, self.name)
+        os.makedirs(step_log_dir, exist_ok=True)
+        return step_log_dir

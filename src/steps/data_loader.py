@@ -7,8 +7,9 @@ class DataLoaderStep(Step):
     """
     Step to read data from input folder and copy to log cache.
     """
-    def __init__(self, name="DataLoader"):
+    def __init__(self, name="DataLoader", appliance_name=""):
         super().__init__(name)
+        self.appliance_name = appliance_name
 
     def run(self, context: dict) -> dict:
         """

@@ -14,10 +14,11 @@ class WaveletSeparationStep(Step):
     Step for wavelet separation and segmentation of power signals.
     Inherits from Step base class.
     """
-    def __init__(self, name="WaveletSeparation", is_shape_dtw=False, plot_count=0):
+    def __init__(self, name="WaveletSeparation", is_shape_dtw=False, plot_count=0, appliance_name=""):
         super().__init__(name)
         self.is_shape_dtw = is_shape_dtw
         self.plot_count = plot_count
+        self.appliance_name = appliance_name
 
     def medfilt_outlier_removal(self, series):
         """Perform outlier removal using median filter."""
@@ -222,8 +223,22 @@ class WaveletSeparationStep(Step):
 
     def run(self, context: dict) -> dict:
         """Main execution logic for WaveletSeparationStep."""
-        input_dir = os.path.join(context['log_root'], 'DataLoader')
-        log_dir = self.get_log_dir(context) # This is log/{seq_id}/WaveletSeparation
+        # 获取 DataLoader 的输入路径
+        if self.appliance_name:
+            sequence_id = context.get('sequence_id', '')
+            data_loader_log_dir = os.path.join('log', f"{self.appliance_name}_{sequence_id}", 'DataLoader')
+        else:
+            data_loader_log_dir = os.path.join(context['log_root'], 'DataLoader')
+        
+        log_dir = self.get_log_dir(context) # This is log/{appliance_name_}{seq_id}/WaveletSeparation
+        
+        # 尝试使用 data_loader_log_dir，如果不存在则回退到原始路径
+        if not os.path.exists(data_loader_log_dir):
+            print(f"DataLoader directory not found at: {data_loader_log_dir}")
+            print(f"Falling back to: {os.path.join(context['log_root'], 'DataLoader')}")
+            input_dir = os.path.join(context['log_root'], 'DataLoader')
+        else:
+            input_dir = data_loader_log_dir
         
         if not os.path.exists(input_dir):
             print(f"Error: Input directory {input_dir} not found.")
