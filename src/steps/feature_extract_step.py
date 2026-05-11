@@ -61,6 +61,32 @@ class FeatureExtractStep(Step):
         self.data_path = data_path
         self.seq_len_path = seq_len_path
 
+    def restore(self, context: dict) -> dict:
+        log_dir = self.get_log_dir(context)
+        feature_dir = os.path.join(log_dir, 'extracted_features')
+        if not os.path.isdir(feature_dir):
+            return context
+
+        candidates = [
+            os.path.join(feature_dir, f)
+            for f in os.listdir(feature_dir)
+            if f.lower().endswith('.npy')
+        ]
+        if not candidates:
+            return context
+
+        candidates.sort(key=lambda p: os.path.getmtime(p))
+        feature_path = candidates[-1]
+        extracted_features = np.load(feature_path)
+        context['features'] = extracted_features
+        context['feature_extract_config'] = {
+            'model_name': self.model_name,
+            'latent_dim': self.latent_dim,
+            'restored_from': feature_path,
+            'output_feature_shape': tuple(extracted_features.shape),
+        }
+        return context
+
     def visualize_training_history(self, training_history, model_name, result_dir, file_name):
         """
         Visualize training history and save as JSON file
@@ -314,4 +340,3 @@ class FeatureExtractStep(Step):
         print("="*70)
         
         return context
-

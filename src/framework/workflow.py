@@ -10,10 +10,11 @@ class Workflow:
     """
     Manages the sequential execution of ML workflow steps.
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, sequence_id: str | None = None, resume: bool = False):
         self.name = name
         self.steps: List[Step] = []
-        self.sequence_id = self._generate_sequence_id()
+        self.sequence_id = sequence_id or self._generate_sequence_id()
+        self.resume = bool(resume)
         self.context = {
             'sequence_id': self.sequence_id,
             'input_root': 'input',
@@ -54,9 +55,16 @@ class Workflow:
                 
                 # Update context with current step log dir
                 step_log_dir = step.get_log_dir(self.context)
+                done_flag_path = os.path.join(step_log_dir, ".done")
+                if self.resume and os.path.exists(done_flag_path):
+                    self.context = step.restore(self.context)
+                    self.logger.info(f"Step {step.name} skipped (already done).")
+                    continue
                 
                 # Execute step
                 self.context = step.run(self.context)
+                with open(done_flag_path, "w", encoding="utf-8") as f:
+                    f.write(self.sequence_id)
                 
                 self.logger.info(f"Step {step.name} completed successfully.")
             

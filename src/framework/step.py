@@ -24,6 +24,9 @@ class Step(ABC):
         """
         pass
 
+    def restore(self, context: dict) -> dict:
+        return context
+
     def get_log_dir(self, context: dict) -> str:
         """
         Get the specific log directory for this step, optionally with appliance name.
@@ -38,12 +41,7 @@ class Step(ABC):
         Returns:
             str: Path to step's log directory
         """
-        if self.appliance_name:
-            sequence_id = context.get('sequence_id', '')
-            log_root = os.path.join('log', f"{self.appliance_name}_{sequence_id}")
-        else:
-            log_root = context.get('log_root', os.path.join('log', 'default'))
-        
+        log_root = context.get('log_root', os.path.join('log', 'default'))
         step_log_dir = os.path.join(log_root, self.name)
         os.makedirs(step_log_dir, exist_ok=True)
         return step_log_dir

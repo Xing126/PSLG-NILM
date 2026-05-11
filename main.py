@@ -13,13 +13,14 @@ if models_dir not in sys.path:
     sys.path.insert(0, models_dir)
 
 from src.framework.workflow import Workflow
+from src.steps.extract_active_data_step import ExtractActiveDataStep
 from src.steps.data_loader import DataLoaderStep
 from src.steps.wavelet_separation import WaveletSeparationStep
 from src.steps.feature_extract_step import FeatureExtractStep
 from src.steps.time_clustering_step import TimeClusteringStep
 
 
-def run_workflow(config_path: str):
+def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None = None):
     """
     Main function to run the workflow based on config file.
     """
@@ -30,9 +31,29 @@ def run_workflow(config_path: str):
     # Initialize workflow with name from config
     workflow_name = config['workflow'].get('name', 'ML_Workflow')
     appliance_name = config['workflow'].get('appliance_name', '')
-    wf = Workflow(workflow_name)
+    resume_cfg = bool(config.get('workflow', {}).get('resume', False))
+    sequence_id_cfg = config.get('workflow', {}).get('sequence_id', None)
+    wf = Workflow(
+        workflow_name,
+        sequence_id=sequence_id or sequence_id_cfg,
+        resume=resume or resume_cfg,
+    )
 
     # Add steps to the workflow sequentially based on enabled flag in config
+    extract_active_cfg = config["steps"].get("extract_active_data", {})
+    if extract_active_cfg.get("enabled", False):
+        wf.add_step(
+            ExtractActiveDataStep(
+                name="ExtractActiveData",
+                appliance_name=appliance_name,
+                input_file=extract_active_cfg.get("input_file", ""),
+                power_threshold=extract_active_cfg.get("power_threshold", 1.0),
+                min_duration_seconds=extract_active_cfg.get("min_duration_seconds", 30),
+                context_seconds=extract_active_cfg.get("context_seconds", 120),
+                set_input_root=extract_active_cfg.get("set_input_root", True),
+            )
+        )
+
     if config['steps']['data_loader'].get('enabled', True):
         wf.add_step(DataLoaderStep("DataLoader", appliance_name=appliance_name))
 
@@ -95,6 +116,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the ML Workflow framework.")
     parser.add_argument("--config", type=str, default="config/config.yaml", help="Path to configuration file.")
     parser.add_argument("--sample", action="store_true", help="Create sample data in input folder.")
+    parser.add_argument("--resume", action="store_true", help="Resume from cached step outputs if available.")
+    parser.add_argument("--sequence-id", type=str, default=None, help="Specify existing sequence_id for resume.")
     args = parser.parse_args()
 
     # Create sample data if requested
@@ -102,4 +125,4 @@ if __name__ == "__main__":
         create_sample_data()
 
     # Run workflow
-    run_workflow(args.config)
+    run_workflow(args.config, resume=args.resume, sequence_id=args.sequence_id)

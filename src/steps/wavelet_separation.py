@@ -221,24 +221,26 @@ class WaveletSeparationStep(Step):
         if cp_export:
             pd.DataFrame(cp_export).to_csv(os.path.join(label_dir, f"Changepoints_{filename_base}.csv"), index=False)
 
+    def restore(self, context: dict) -> dict:
+        log_dir = self.get_log_dir(context)
+        x_path = os.path.join(log_dir, "X.npy")
+        lengths_path = os.path.join(log_dir, "lengths.npy")
+        if not (os.path.exists(x_path) and os.path.exists(lengths_path)):
+            return context
+
+        X = np.load(x_path)
+        L = np.load(lengths_path)
+
+        if "data" not in context:
+            context["data"] = {}
+        context["data"]["X"] = X
+        context["data"]["lengths"] = L
+        return context
+
     def run(self, context: dict) -> dict:
         """Main execution logic for WaveletSeparationStep."""
-        # 获取 DataLoader 的输入路径
-        if self.appliance_name:
-            sequence_id = context.get('sequence_id', '')
-            data_loader_log_dir = os.path.join('log', f"{self.appliance_name}_{sequence_id}", 'DataLoader')
-        else:
-            data_loader_log_dir = os.path.join(context['log_root'], 'DataLoader')
-        
-        log_dir = self.get_log_dir(context) # This is log/{appliance_name_}{seq_id}/WaveletSeparation
-        
-        # 尝试使用 data_loader_log_dir，如果不存在则回退到原始路径
-        if not os.path.exists(data_loader_log_dir):
-            print(f"DataLoader directory not found at: {data_loader_log_dir}")
-            print(f"Falling back to: {os.path.join(context['log_root'], 'DataLoader')}")
-            input_dir = os.path.join(context['log_root'], 'DataLoader')
-        else:
-            input_dir = data_loader_log_dir
+        input_dir = os.path.join(context['log_root'], 'DataLoader')
+        log_dir = self.get_log_dir(context)
         
         if not os.path.exists(input_dir):
             print(f"Error: Input directory {input_dir} not found.")
