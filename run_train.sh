@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -J combine-train-test
-#SBATCH -p A1000
+#SBATCH -p RTX3090
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
 #SBATCH --mem=32G
@@ -18,7 +18,7 @@ echo "Allocated GPUs: $CUDA_VISIBLE_DEVICES"
 # --- 2. 创建日志和输出目录 ---
 mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/slurm_log
 mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/output
-mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/plot
+mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/log
 echo "Created necessary directories"
 
 # --- 3. 设置软件环境 ---
@@ -29,22 +29,19 @@ echo "Modules loaded."
 
 # --- 4. 激活 Conda 环境 ---
 source $(conda info --base)/bin/activate
-conda activate PSLG-NILM
+conda activate nilm_genenal
 echo "Conda environment activated: $CONDA_DEFAULT_ENV"
 
 # --- 5. 执行数据预处理与训练脚本 ---
 echo "Starting main.py..."
 cd /home/scnu2023024258/data/code/PSLG-NILM
 
-if [ -f "main.py" ]; then
-    python main.py --config config/config.yaml
-    if [ $? -eq 0 ]; then
-        echo "Scripts executed successfully!"
-    else
-        echo "Scripts execution failed!"
-    fi
+python main.py --config config/config.yaml
+
+if [ $? -eq 0 ]; then
+    echo "Workflow executed successfully!"
 else
-    echo "Error: main.py not found!"
+    echo "Workflow execution failed!"
 fi
 
 # --- 6. 作业结束 ---
