@@ -24,6 +24,8 @@ wheels/
 # Logs and outputs
 log/
 output/
+exp_data/
+
 
 # Data
 input/
@@ -33,3 +35,6 @@ input/
 .idea/
 *.swp
 *.swo
+
+# Github
+.github/

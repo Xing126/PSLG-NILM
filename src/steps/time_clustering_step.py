@@ -4,7 +4,8 @@ import time
 from datetime import datetime
 
 import numpy as np
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, KMeans
+from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score, silhouette_score
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from scipy.spatial.distance import cdist
 from scipy.signal import medfilt
@@ -19,8 +20,8 @@ from src.utlis import clustering_utils
 
 class TimeClusteringStep(Step):
     """
-    Step for time series clustering using DBSCAN.
-    Migrated from src/time_clustering/dbscan.py
+    Step for time series clustering.
+    Supports DBSCAN and KMeans.
     """
     def __init__(
         self,
@@ -31,11 +32,23 @@ class TimeClusteringStep(Step):
         save_dir=None,
         col_index=2,
         eps=1.25,
+        min_eps=0.5,
+        max_eps=2.0,
+        eps_gap=0.1,
         min_pts=20,
         metric='euclidean',
         normalization_method='zscore',
         cluster_method='dbscan',
+        kmeans_n_clusters=8,
+        min_cluster=2,
+        max_cluster=10,
+        kmeans_random_state=42,
+        kmeans_n_init=10,
+        kmeans_max_iter=300,
         enable_visualization=True,
+        visualize_noise=True,
+        visualization_language='zh',
+        cluster_stack_count=50,
         appliance_name=""
     ):
         super().__init__(name)
@@ -45,11 +58,24 @@ class TimeClusteringStep(Step):
         self.save_dir = save_dir or os.path.join('cluster_result', 'dbscan_result')
         self.col_index = col_index
         self.eps = eps
+        self.min_eps = min_eps
+        self.max_eps = max_eps
+        self.eps_gap = eps_gap
         self.min_pts = min_pts
         self.metric = metric
         self.normalization_method = normalization_method
-        self.cluster_method = cluster_method
+        self.cluster_method = str(cluster_method).lower()
+        self.kmeans_n_clusters = kmeans_n_clusters
+        self.min_cluster = min_cluster
+        self.max_cluster = max_cluster
+        self.kmeans_random_state = kmeans_random_state
+        self.kmeans_n_init = kmeans_n_init
+        self.kmeans_max_iter = kmeans_max_iter
         self.enable_visualization = enable_visualization
+        self.visualize_noise = bool(visualize_noise)
+        self.visualization_language = str(visualization_language).lower()
+        self.cluster_stack_count = max(1, int(cluster_stack_count))
+        self.selected_scan_eps = None
         self.appliance_name = appliance_name
 
     def load_data(self, context: dict) -> tuple:
@@ -121,6 +147,36 @@ class TimeClusteringStep(Step):
         if actual_len <= 0:
             return fallback_len
         return min(actual_len, fallback_len)
+
+    def _validate_col_index(self, data_np: np.ndarray):
+        """Validate col_index against raw data feature dimension before clustering/visualization."""
+        if data_np is None:
+            return
+
+        if not isinstance(data_np, np.ndarray):
+            raise ValueError(
+                f"[TimeClustering] Invalid data type for col_index check: {type(data_np).__name__}. "
+                "Expected numpy.ndarray."
+            )
+
+        if data_np.ndim < 3:
+            raise ValueError(
+                f"[TimeClustering] Invalid data shape for col_index check: {data_np.shape}. "
+                "Expected at least 3D array with shape (n_samples, seq_len, n_features)."
+            )
+
+        feature_dim = int(data_np.shape[2])
+        if feature_dim <= 0:
+            raise ValueError(
+                f"[TimeClustering] Invalid feature dimension: {feature_dim}. "
+                "n_features must be positive."
+            )
+
+        if not (0 <= int(self.col_index) < feature_dim):
+            raise ValueError(
+                f"[TimeClustering] Invalid col_index={self.col_index}. "
+                f"Valid range is 0..{feature_dim - 1} for input shape {data_np.shape}."
+            )
 
     def normalize_features(self, feature_matrix: np.ndarray) -> list:
         """Normalize feature matrix using specified method."""
@@ -219,6 +275,186 @@ class TimeClusteringStep(Step):
 
         return labels
 
+    def run_kmeans(self, feature_matrix: np.ndarray) -> np.ndarray:
+        """Execute KMeans clustering on normalized feature vectors."""
+        print(
+            "[TimeClustering] Running KMeans with "
+            f"n_clusters={self.kmeans_n_clusters}, random_state={self.kmeans_random_state}, "
+            f"n_init={self.kmeans_n_init}, max_iter={self.kmeans_max_iter}"
+        )
+
+        kmeans_model = KMeans(
+            n_clusters=self.kmeans_n_clusters,
+            random_state=self.kmeans_random_state,
+            n_init=self.kmeans_n_init,
+            max_iter=self.kmeans_max_iter,
+        )
+        labels = kmeans_model.fit_predict(feature_matrix)
+
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = np.sum(labels == -1)
+        print(f"[TimeClustering] Clustering complete: {n_clusters} clusters, {n_noise} noise points")
+
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        for label, count in zip(unique_labels, counts):
+            label_name = "noise" if label == -1 else f"cluster_{label}"
+            print(f"  {label_name}: {count} samples")
+
+        return labels
+
+    def run_kmeans_scan(self, feature_matrix: np.ndarray, save_dir: str) -> tuple:
+        """Scan n_clusters in [min_cluster, max_cluster], save metrics JSON/plot, and return best labels."""
+        min_k = int(self.min_cluster)
+        max_k = int(self.max_cluster)
+        n_samples = int(feature_matrix.shape[0])
+
+        if min_k < 2:
+            raise ValueError(f"[TimeClustering] min_cluster must be >= 2, got {min_k}")
+        if max_k < min_k:
+            raise ValueError(f"[TimeClustering] max_cluster must be >= min_cluster, got {max_k} < {min_k}")
+        if min_k >= n_samples:
+            raise ValueError(
+                f"[TimeClustering] min_cluster={min_k} is invalid for n_samples={n_samples}. "
+                "min_cluster must be less than number of samples."
+            )
+
+        scan_records = []
+        best_score = -np.inf
+        best_k = None
+        best_labels = None
+
+        print(f"[TimeClustering] Running KMeans scan from k={min_k} to k={max_k}")
+
+        for k in range(min_k, max_k + 1):
+            if k >= n_samples:
+                print(f"[TimeClustering] Skip k={k}: requires k < n_samples ({n_samples})")
+                continue
+
+            kmeans_model = KMeans(
+                n_clusters=k,
+                random_state=self.kmeans_random_state,
+                n_init=self.kmeans_n_init,
+                max_iter=self.kmeans_max_iter,
+            )
+            labels = kmeans_model.fit_predict(feature_matrix)
+
+            sci = silhouette_score(feature_matrix, labels, metric='euclidean')
+            dbi = davies_bouldin_score(feature_matrix, labels)
+            chi = calinski_harabasz_score(feature_matrix, labels)
+
+            record = {
+                'n_clusters': int(k),
+                'sci': float(sci),
+                'dbi': float(dbi),
+                'chi': float(chi),
+            }
+            scan_records.append(record)
+
+            print(
+                f"[TimeClustering] k={k} -> "
+                f"SCI={record['sci']:.6f}, DBI={record['dbi']:.6f}, CHI={record['chi']:.6f}"
+            )
+
+            # Choose best k by SCI (higher is better)
+            if sci > best_score:
+                best_score = float(sci)
+                best_k = int(k)
+                best_labels = labels
+
+        if best_labels is None:
+            raise ValueError("[TimeClustering] KMeans scan failed: no valid k in scan range.")
+
+        clustering_utils.save_kmeans_scan_artifacts(
+            scan_records,
+            best_k,
+            save_dir,
+            data_path=self.data_path,
+            appliance_name=self.appliance_name,
+        )
+        return best_labels, best_k, scan_records
+
+    def run_dbscan_scan(self, dist_matrix: np.ndarray, feature_matrix: np.ndarray, save_dir: str) -> tuple:
+        """Scan eps in [min_eps, max_eps] with step eps_gap for DBSCAN while keeping min_pts fixed."""
+        min_eps = float(self.min_eps)
+        max_eps = float(self.max_eps)
+        eps_gap = float(self.eps_gap)
+        min_pts = int(self.min_pts)
+        n_samples = int(feature_matrix.shape[0])
+
+        if min_pts < 1:
+            raise ValueError(f"[TimeClustering] min_pts must be >= 1, got {min_pts}")
+        if max_eps < min_eps:
+            raise ValueError(f"[TimeClustering] max_eps must be >= min_eps, got {max_eps} < {min_eps}")
+        if eps_gap <= 0:
+            raise ValueError(f"[TimeClustering] eps_gap must be > 0, got {eps_gap}")
+
+        scan_records = []
+        best_score = -np.inf
+        best_labels = None
+        best_eps = None
+
+        print(
+            f"[TimeClustering] Running DBSCAN scan with min_pts={min_pts}, "
+            f"eps={min_eps}..{max_eps}, gap={eps_gap}, metric={self.metric}"
+        )
+
+        eps_values = np.arange(min_eps, max_eps + (eps_gap * 0.5), eps_gap)
+        for eps in eps_values:
+            eps_val = float(round(float(eps), 10))
+            labels = self.run_dbscan(dist_matrix, eps_val, min_pts)
+            n_noise = int(np.sum(labels == -1))
+            n_clusters = int(len(set(labels)) - (1 if -1 in labels else 0))
+
+            sci = None
+            dbi = None
+            chi = None
+            if n_clusters >= 2:
+                valid_idx = labels != -1
+                valid_labels = labels[valid_idx]
+                valid_feature = feature_matrix[valid_idx]
+                valid_dist = dist_matrix[valid_idx][:, valid_idx]
+                if len(valid_labels) > 1 and len(np.unique(valid_labels)) >= 2:
+                    sci = float(silhouette_score(valid_dist, valid_labels, metric='precomputed'))
+                    dbi = float(davies_bouldin_score(valid_feature, valid_labels))
+                    chi = float(calinski_harabasz_score(valid_feature, valid_labels))
+
+            record = {
+                'eps': eps_val,
+                'min_pts': min_pts,
+                'sci': sci,
+                'dbi': dbi,
+                'chi': chi,
+                'n_noise': n_noise,
+                'n_clusters': n_clusters,
+            }
+            scan_records.append(record)
+            print(
+                f"[TimeClustering] eps={eps_val} -> "
+                f"SCI={record['sci']}, DBI={record['dbi']}, CHI={record['chi']}, "
+                f"n_noise={record['n_noise']}, n_clusters={record['n_clusters']}"
+            )
+
+            current_score = float(record['sci']) if record['sci'] is not None else -np.inf
+            if current_score > best_score:
+                best_score = current_score
+                best_labels = labels
+                best_eps = eps_val
+
+        if best_labels is None:
+            # Fallback: if all SCI invalid, pick the first run result.
+            first = scan_records[0]
+            best_eps = float(first['eps'])
+            best_labels = self.run_dbscan(dist_matrix, best_eps, min_pts)
+
+        clustering_utils.save_dbscan_scan_artifacts(
+            scan_records,
+            best_eps,
+            save_dir,
+            data_path=self.data_path,
+            appliance_name=self.appliance_name,
+        )
+        return best_labels, best_eps, scan_records
+
     def evaluate_clustering(self, labels: np.ndarray, dist_matrix: np.ndarray,
                            org_data: np.ndarray, feature_matrix: np.ndarray,
                            seq_len: np.ndarray, save_dir: str,
@@ -227,6 +463,44 @@ class TimeClusteringStep(Step):
         metrics = {}
 
         try:
+            quant_dist_method = 'euclidean'
+            if self.cluster_method == 'dbscan' and self.metric in ('dtw', 'fastdtw'):
+                quant_dist_method = 'dtw'
+
+            if self.cluster_method == 'dbscan':
+                clustering_hyperparams = {
+                    'eps': float(self.eps),
+                    'min_pts': int(self.min_pts),
+                    'metric': str(self.metric),
+                }
+            elif self.cluster_method in ('dbscan-scan', 'dbscan_scan'):
+                clustering_hyperparams = {
+                    'min_eps': float(self.min_eps),
+                    'max_eps': float(self.max_eps),
+                    'eps_gap': float(self.eps_gap),
+                    'min_pts': int(self.min_pts),
+                    'selected_eps': float(self.selected_scan_eps) if self.selected_scan_eps is not None else float(self.eps),
+                    'metric': str(self.metric),
+                }
+            elif self.cluster_method == 'kmeans':
+                clustering_hyperparams = {
+                    'n_clusters': int(self.kmeans_n_clusters),
+                    'random_state': int(self.kmeans_random_state),
+                    'n_init': int(self.kmeans_n_init),
+                    'max_iter': int(self.kmeans_max_iter),
+                }
+            elif self.cluster_method == 'kmeans-scan':
+                clustering_hyperparams = {
+                    'min_cluster': int(self.min_cluster),
+                    'max_cluster': int(self.max_cluster),
+                    'selected_n_clusters': int(len(np.unique(labels))),
+                    'random_state': int(self.kmeans_random_state),
+                    'n_init': int(self.kmeans_n_init),
+                    'max_iter': int(self.kmeans_max_iter),
+                }
+            else:
+                clustering_hyperparams = {}
+
             sil_score, db_score, ch_score = clustering_utils.cluster_result_quantification(
                 cluster_labels=labels,
                 dist_matrix=dist_matrix,
@@ -234,9 +508,17 @@ class TimeClusteringStep(Step):
                 feature_matrix=feature_matrix,
                 save_dir=save_dir,
                 seq_length=seq_len,
+                dist_method=quant_dist_method,
+                cluster_method=self.cluster_method,
+                cluster_hyperparams=clustering_hyperparams,
+                language=self.visualization_language,
                 col_index=self.col_index,
                 visualize=enable_visualization,
+                visualize_noise=self.visualize_noise,
+                cluster_stack_count=self.cluster_stack_count,
                 sampling_threshold=200,
+                data_path=self.data_path,
+                appliance_name=self.appliance_name,
             )
 
             if sil_score is not None:
@@ -314,9 +596,15 @@ class TimeClusteringStep(Step):
         os.makedirs(save_dir, exist_ok=True)
 
         print(f"[TimeClustering] Starting clustering workflow")
-        print(f"[TimeClustering] Parameters: eps={self.eps}, min_pts={self.min_pts}, metric={self.metric}")
+        print(
+            f"[TimeClustering] Parameters: method={self.cluster_method}, "
+            f"eps={self.eps}, min_pts={self.min_pts}, metric={self.metric}"
+        )
 
         data_np, feature_matrix, seq_len = self.load_data(context)
+
+        # Validate visualization/index selection early to fail fast with clear diagnostics.
+        self._validate_col_index(data_np)
 
         if data_np is None or feature_matrix is None:
             print("[TimeClustering] Error: Required data not found. Please provide feature data.")
@@ -332,13 +620,56 @@ class TimeClusteringStep(Step):
             print("[TimeClustering] Error: No valid features after normalization.")
             return context
 
-        dist_matrix = self.get_distance_matrix(
-            normalized_feature_list,
-            metric=self.metric,
-            cache_dir=save_dir
-        )
+        normalized_feature_matrix = np.asarray(normalized_feature_list)
 
-        labels = self.run_dbscan(dist_matrix, self.eps, self.min_pts)
+        if self.cluster_method == 'dbscan':
+            dist_matrix = self.get_distance_matrix(
+                normalized_feature_list,
+                metric=self.metric,
+                cache_dir=save_dir
+            )
+            labels = self.run_dbscan(dist_matrix, self.eps, self.min_pts)
+        elif self.cluster_method in ('dbscan-scan', 'dbscan_scan'):
+            dist_matrix = self.get_distance_matrix(
+                normalized_feature_list,
+                metric=self.metric,
+                cache_dir=save_dir
+            )
+            _labels, best_eps, scan_records = self.run_dbscan_scan(
+                dist_matrix=dist_matrix,
+                feature_matrix=normalized_feature_matrix,
+                save_dir=save_dir,
+            )
+            self.selected_scan_eps = float(best_eps)
+            self.eps = float(best_eps)
+
+            # In scan mode, only export scan artifacts (JSON + line chart),
+            # and do not persist a selected-best clustering result.
+            context['cluster_save_dir'] = save_dir
+            context['dbscan_scan_best_eps'] = float(best_eps)
+            context['dbscan_scan_records'] = scan_records
+            print("[TimeClustering] DBSCAN scan mode completed (scan artifacts only)")
+            return context
+        elif self.cluster_method == 'kmeans':
+            labels = self.run_kmeans(normalized_feature_matrix)
+            # Keep quantification path unified by building a precomputed distance matrix.
+            dist_matrix = cdist(normalized_feature_matrix, normalized_feature_matrix, metric='euclidean')
+        elif self.cluster_method in ('kmeans-scan', 'kmeans_scan'):
+            _labels, best_k, scan_records = self.run_kmeans_scan(normalized_feature_matrix, save_dir)
+            self.kmeans_n_clusters = int(best_k)
+
+            # In scan mode, only export scan artifacts (JSON + line chart),
+            # and do not persist a selected-best clustering result.
+            context['cluster_save_dir'] = save_dir
+            context['kmeans_scan_best_k'] = int(best_k)
+            context['kmeans_scan_records'] = scan_records
+            print("[TimeClustering] KMeans scan mode completed (scan artifacts only)")
+            return context
+        else:
+            raise ValueError(
+                f"Unsupported cluster_method: {self.cluster_method}. "
+                "Supported methods: dbscan, dbscan-scan, kmeans, kmeans-scan"
+            )
 
         self.evaluate_clustering(
             labels,

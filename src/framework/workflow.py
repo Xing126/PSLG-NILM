@@ -10,15 +10,19 @@ class Workflow:
     """
     Manages the sequential execution of ML workflow steps.
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, appliance_name: str = ""):
         self.name = name
+        self.appliance_name = str(appliance_name).strip()
         self.steps: List[Step] = []
         self.sequence_id = self._generate_sequence_id()
+        run_id = self._build_run_id()
         self.context = {
             'sequence_id': self.sequence_id,
+            'appliance_name': self.appliance_name,
+            'run_id': run_id,
             'input_root': 'input',
-            'log_root': os.path.join('log', self.sequence_id),
-            'output_root': os.path.join('output', self.sequence_id),
+            'log_root': os.path.join('log', run_id),
+            'output_root': os.path.join('output', run_id),
             'data': {} # Stores intermediate results
         }
         
@@ -30,6 +34,12 @@ class Workflow:
     def _generate_sequence_id(self) -> str:
         """Generates a unique ID based on the current timestamp."""
         return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    def _build_run_id(self) -> str:
+        """Builds run id as appliance_timestamp when appliance name is provided."""
+        if self.appliance_name:
+            return f"{self.appliance_name}_{self.sequence_id}"
+        return self.sequence_id
 
     def _init_dirs(self):
         """Creates output subdirectories according to specification."""

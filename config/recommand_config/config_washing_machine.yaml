@@ -4,7 +4,7 @@
 workflow:
   name: "Primitive State Segmentation and Clustering"
   description: "Standard ML workflow for processing and training on input data."
-  appliance_name: "microwave" 
+  appliance_name: "dishwasher" 
 
 # Step-specific configurations
 steps:
@@ -37,10 +37,10 @@ steps:
   
   time_clustering:
     enabled: true
-    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\data_fusion.npy"
-    feature_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\bilstm_ae_attention_v2_features_cleaned_power_64_dim.npy"
-    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\seq_length_fusion.npy"
-    cluster_method: "kmeans-scan"  # dbscan / dbscan-scan / kmeans / kmeans-scan
+    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\dishwasher\\data_fusion.npy"
+    feature_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\dishwasher\\bilstm_ae_attention_v2_features_cleaned_power_64_dim.npy"
+    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\dishwasher\\seq_length_fusion.npy"
+    cluster_method: "dbscan-scan"  # dbscan / dbscan-scan / kmeans / kmeans-scan
     method_specific:
       dbscan:
         eps: 1.25
