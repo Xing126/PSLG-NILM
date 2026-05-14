@@ -1,208 +1,126 @@
-# TimeClustering Step 使用说明
+﻿# TimeClustering Step 使用说明（精简版）
 
-本文档说明 `TimeClusteringStep` 的用途、参数配置、执行流程、产物结构与常见问题。
+本文档仅说明当前代码已实现能力。
 
-## 术语与字段约定（统一）
+## 1. 功能概览
 
-- `data_path`：原始样本张量路径（可选），用于保存簇样本与可视化时索引原始序列。
-- `feature_path`：聚类输入特征路径（核心输入），通常来自 `FeatureExtractStep` 输出。
-- `seq_len_path`：样本真实长度路径，和 `data_path` 配套。
-- `context['features']`：若未配置 `feature_path`，从上下文读取聚类特征。
-- `enable_visualization`：聚类评估可视化总开关（center/stack/tsne/样本图）。
+`TimeClusteringStep` 支持 4 种模式：
 
-## 1. 功能概述
+- `dbscan`
+- `dbscan-scan`
+- `kmeans`
+- `kmeans-scan`
 
-`TimeClusteringStep` 负责对样本进行聚类，核心流程是：
+输入仍以特征矩阵 `feature_path`（或 `context['features']`）为聚类主输入；`data_path` 主要用于可视化与样本导出。
 
-1. 读取数据张量、特征矩阵、序列长度
-2. 对特征做归一化
-3. 基于特征计算样本间距离矩阵
-4. 使用 DBSCAN 聚类
-5. 输出标签、簇样本、评估指标与可视化结果
+## 2. 配置要点
 
-重要说明：
+配置入口：`config/config.yaml -> steps.time_clustering`
 
-- 当前实现使用 `feature_matrix` 进行聚类，不是直接用原始 `data_np` 聚类。
-- `data_np` 主要用于结果保存与可视化。
+- `cluster_method`: `dbscan | dbscan-scan | kmeans | kmeans-scan`
+- `method_specific`: 按方法分组参数
+- `visualization_specific`: 可视化二级配置
+  - `enabled`
+  - `visualize_noise`
+  - `language`
+  - `cluster_stack_count`
 
-
-## 2. 输入优先级与数据契约
-
-### 2.1 输入优先级
-
-按下列顺序读取：
-
-- `data_np`：
-  1) `data_path`
-  2) `context['data']['X']`
-- `feature_matrix`：
-  1) `feature_path`
-  2) `context['features']`
-- `seq_len`：
-  1) `seq_len_path`
-  2) `context['seq_len']`
-  3) `context['data']['lengths']`
-
-### 2.2 数据契约
-
-- `feature_matrix` 需为 `numpy.ndarray`
-- `data_np` 建议为 3D：`(N, T, D)`
-- `seq_len` 建议为 `(N,)` 或 `(N,1)`
-
-
-## 3. 配置方法
-
-在 `config/config.yaml` 的 `steps.time_clustering` 下配置。
-
-示例：
+示例（扫描模式）：
 
 ```yaml
 steps:
   time_clustering:
-    enabled: true
-
-    # 输入
-    data_path: "D:/path/to/data_fusion.npy"
-    feature_path: "D:/path/to/features.npy"  # 通常来自 FeatureExtract 的 extracted_features/*.npy
-    seq_len_path: "D:/path/to/seq_length.npy"
-
-    # 聚类参数
-    eps: 0.25
-    min_pts: 20
-    metric: "euclidean"         # euclidean / dtw / fastdtw
-    normalization_method: "zscore"  # zscore / minmax
-    col_index: 2
-
-    # 可视化总开关（缺省 true）
-    enable_visualization: true
+    cluster_method: "dbscan-scan"
+    method_specific:
+      dbscan-scan:
+        min_eps: 0.02
+        max_eps: 2.0
+        eps_gap: 0.02
+        min_pts: 20
+        metric: "euclidean"
+    visualization_specific:
+      enabled: true
+      visualize_noise: true
+      language: "en"
+      cluster_stack_count: 50
 ```
 
-兼容旧配置：
+## 3. 各模式参数
 
-- 若未配置 `enable_visualization`，`main.py` 会回退读取 `enable_heatmap`
-- 两者都没有时默认 `true`
-- 推荐仅使用 `enable_visualization`，避免新旧键混用
+### 3.1 dbscan
 
-
-## 4. main.py 参数传递
-
-`main.py` 会把配置映射到 `TimeClusteringStep`：
-
-- `data_path`
-- `feature_path`
-- `seq_len_path`
 - `eps`
 - `min_pts`
+- `metric` (`euclidean | dtw | fastdtw`)
+
+### 3.2 dbscan-scan
+
+- `min_eps`（必填）
+- `max_eps`（必填）
+- `eps_gap`（默认可配，> 0）
+- `min_pts`（固定值，不扫描）
 - `metric`
-- `normalization_method`
-- `col_index`
-- `enable_visualization`
 
+说明：扫描维度是 `eps`，会记录每个 eps 对应的 `SCI/DBI/CHI/n_noise/n_clusters`。
 
-## 5. 运行方法
+### 3.3 kmeans
 
-### 5.1 常规运行
+- `n_clusters`
+- `random_state`
+- `n_init`
+- `max_iter`
 
-```bash
-python main.py --config config/config.yaml
-```
+### 3.4 kmeans-scan
 
-### 5.2 只跑聚类步骤（建议排查时使用）
+- `min_cluster`
+- `max_cluster`
+- `random_state`
+- `n_init`
+- `max_iter`
 
-```yaml
-steps:
-  data_loader:
-    enabled: false
-  wavelet_separation:
-    enabled: false
-  feature_extract:
-    enabled: false
-  time_clustering:
-    enabled: true
-```
+说明：扫描维度是 `n_clusters`，记录每个 k 的 `SCI/DBI/CHI`。
 
+## 4. 输出规则（重点）
 
-## 6. 原理解析
+### 4.1 普通模式（dbscan / kmeans）
 
-### 6.1 特征归一化
+会保存聚类结果与评估产物：
 
-根据 `normalization_method`：
+- `cluster_labels.npy`
+- `Cluster_*.npy`
+- `evaluation_metrics.json`
+- 可视化图（center/stack/tsne 等，受 `visualization_specific.enabled` 控制）
 
-- `zscore`：StandardScaler
-- `minmax`：MinMaxScaler
+### 4.2 扫描模式（dbscan-scan / kmeans-scan）
 
-### 6.2 距离矩阵
+只输出扫描结果，不保存“最佳聚类结果”文件。
 
-- `euclidean`：`scipy.spatial.distance.cdist`
-- `dtw` / `fastdtw`：`tslearn.metrics.cdist_dtw`
-- DTW 距离矩阵支持缓存到当前步骤目录
+- `dbscan-scan`：
+  - `dbscan_scan_metrics.json`
+  - `dbscan_scan_metrics.png`
+- `kmeans-scan`：
+  - `kmeans_scan_metrics.json`
+  - `kmeans_scan_metrics.png`
 
-### 6.3 DBSCAN 聚类
+即不会落 `cluster_labels.npy` / `Cluster_*.npy`。
 
-- 使用 `metric="precomputed"`，即直接基于距离矩阵聚类
-- 参数：`eps` 与 `min_pts`
+## 5. 指标与 JSON
 
-### 6.4 评估与可视化
+`evaluation_metrics.json`（普通模式）中包含：
 
-评估与可视化由 `clustering_utils.cluster_result_quantification` 统一执行：
+- `clustering_method`
+- `clustering_hyperparameters`
+- `distance_method_for_quantification`
+- `cluster_distribution`
+- `n_clusters`
+- `n_noise`
+- `silhouette_score`（可选）
+- `davies_bouldin_score`（可选）
+- `calinski_harabasz_score`（可选）
 
-- 指标：
-  - Silhouette
-  - Davies-Bouldin
-  - Calinski-Harabasz
-- 结果 JSON：
-  - `evaluation_metrics.json`
-- 可视化（开启时）：
-  - 每簇前 N 个样本图（`cluster_x/item_y.png`）
-  - `cluster_center.png`
-  - `clusters_stacked.png`
-  - `tsne.png`
+## 6. 约束与常见问题
 
-
-## 7. 产物结构
-
-当前代码中，聚类产物保存在当前 Step 日志目录：
-
-- `log/{appliance_name}_{sequence_id}/TimeClustering/`
-  - `cluster_labels.npy`
-  - `Cluster_-1.npy`（若存在噪声）
-  - `Cluster_0.npy`, `Cluster_1.npy`, ...
-  - `evaluation_metrics.json`
-  - `dtw_dist_matrix_*.npy`（仅 DTW 度量时）
-  - `cluster_center.png`（可视化开启时）
-  - `clusters_stacked.png`（可视化开启时）
-  - `tsne.png`（可视化开启时）
-  - `cluster_{id}/item_*.png`（可视化开启时）
-
-并更新 context：
-
-- `context['cluster_labels']`
-- `context['cluster_save_dir']`
-- `context['n_clusters']`
-- `context['n_noise']`
-
-
-## 8. 常见问题
-
-### 8.1 没有生成 center/stack/tsne 图片
-
-常见原因：
-
-- `enable_visualization` 实际为 `false`
-- `main.py` 未正确读取配置开关
-
-排查建议：
-
-1. 检查 `config.yaml` 是否设置 `steps.time_clustering.enable_visualization: true`
-2. 检查 `main.py` 是否将该参数传给 `TimeClusteringStep`
-3. 检查运行日志中是否出现 `Quantification warning`
-
-### 8.2 报错 features 类型不对
-
-- 需要 `context['features']` 是 `numpy.ndarray`
-- 若从文件输入，请确保 `feature_path` 指向 `.npy` 特征矩阵
-
-### 8.3 报错 data/feature 缺失
-
-- 至少保证能读取到 `data_np` 与 `feature_matrix`
-- 若关闭了上游 Step，请在配置里显式提供对应文件路径
+- `col_index` 会在运行前校验，必须在 `0..(dim-1)`。
+- `dbscan-scan` 下必须提供 `min_eps` 和 `max_eps`。
+- 当某次扫描仅得到 1 个有效簇时，`SCI/DBI/CHI` 可能为 `null`（这是预期行为）。
+- DTW 距离矩阵仅在 `metric=dtw/fastdtw` 时缓存。

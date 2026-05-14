@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import warnings
+from functools import lru_cache
 from typing import Optional
 
 import matplotlib.font_manager as fm
@@ -10,6 +11,40 @@ import numpy as np
 from sklearn.manifold import TSNE
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score, silhouette_score
 from tslearn.barycenters import dtw_barycenter_averaging
+
+
+def _normalize_language(language: str) -> str:
+	lang = str(language).lower()
+	if lang.startswith('zh'):
+		return 'zh'
+	return 'en'
+
+
+@lru_cache(maxsize=1)
+def _load_i18n_table() -> dict:
+
+	i18n_file = os.path.join(os.path.dirname(__file__), 'resources', 'cluster_visualization_i18n.json')
+	if not os.path.exists(i18n_file):
+		raise FileNotFoundError(f'i18n resource not found: {i18n_file}')
+
+	with open(i18n_file, 'r', encoding='utf-8') as f:
+		table = json.load(f)
+
+	if not (isinstance(table, dict) and 'zh' in table and 'en' in table):
+		raise ValueError(
+			f"Invalid i18n resource format: {i18n_file}. "
+			"Expected top-level keys 'zh' and 'en'."
+		)
+
+	return table
+
+
+def _i18n(language: str) -> dict:
+	lang = _normalize_language(language)
+	table = _load_i18n_table()
+	if lang in table and isinstance(table[lang], dict):
+		return table[lang]
+	return table.get('en', {})
 
 
 def setup_chinese_font() -> bool:
@@ -56,6 +91,7 @@ def visualize_dict_data_layered(
 	bar_width=0.8,
 	x_axis=None,
 	max_labels=5,
+	language='zh',
 	show=True,
 ):
 	"""Visualize dict values as layered bar charts and return the figure."""
@@ -85,6 +121,10 @@ def visualize_dict_data_layered(
 
 	colors = plt.cm.tab10(np.linspace(0, 1, n_items)) if n_items <= 10 else plt.cm.hsv(np.linspace(0, 1, n_items))
 
+	texts = _i18n(language)
+	if title == 'Layered Visualization':
+		title = texts['default_title']
+
 	for idx, (key, value) in enumerate(data_dict.items()):
 		if not isinstance(value, np.ndarray):
 			continue
@@ -97,9 +137,9 @@ def visualize_dict_data_layered(
 
 		x_pos = np.arange(len(value))
 		ax.bar(x_pos, value, width=bar_width, color=colors[idx])
-		ax.set_title(f'Cluster_{key}')
-		ax.set_xlabel('Time')
-		ax.set_ylabel('Power')
+		ax.set_title(f"{texts['cluster_prefix']}_{key}")
+		ax.set_xlabel(texts['time'])
+		ax.set_ylabel(texts['power'])
 
 		n_ticks = len(x_pos)
 		if max_labels > 0 and n_ticks > max_labels:
@@ -151,9 +191,11 @@ def visualize_cluster_by_time_gap(
 	time_gap_value=1,
 	max_duration=3600 * 24,
 	save_json_path='./',
+	language='zh',
 	show=True,
 ):
 	"""Aggregate and visualize cluster durations over fixed time gaps."""
+	texts = _i18n(language)
 	if len(data_mapping) == 0 or len(cluster_result) == 0:
 		raise ValueError('data_mapping and cluster_result must be non-empty')
 	if len(data_mapping) != len(cluster_result):
@@ -216,16 +258,18 @@ def visualize_cluster_by_time_gap(
 
 	fig = visualize_dict_data_layered(
 		cluster_time_stats,
-		title='Cluster Time Statistics',
+		title=texts['time_gap_stats'],
 		x_axis=time_gap_start_datetimes_str,
+		language=language,
 		show=show,
 	)
 	return fig
 
 
-def cluster_result_pic_save(data_array, seq_length, cluster_result, save_dir, threshold=200, col_index=1):
+def cluster_result_pic_save(data_array, seq_length, cluster_result, save_dir, threshold=200, col_index=1, language='zh'):
 	"""Save per-series figures grouped by cluster label."""
 	import shutil
+	texts = _i18n(language)
 
 	cluster_groups = {}
 	for i in range(len(data_array)):
@@ -246,9 +290,9 @@ def cluster_result_pic_save(data_array, seq_length, cluster_result, save_dir, th
 			data = data_array[data_idx][:length][:, col_index]
 			plt.figure(figsize=(10, 6))
 			plt.plot(data)
-			plt.title(f'Cluster {cluster_id} - Item {idx + 1}')
-			plt.xlabel('Time')
-			plt.ylabel('Value')
+			plt.title(f"{texts['cluster_prefix']} {cluster_id} - {texts['series']} {idx + 1}")
+			plt.xlabel(texts['time'])
+			plt.ylabel(texts['value'])
 			plt.savefig(os.path.join(cluster_dir, f'item_{idx + 1}.png'))
 			plt.close()
 
@@ -290,6 +334,134 @@ def _tsne_perplexity(n_samples: int) -> int:
 	return max(2, min(30, n_samples // 10))
 
 
+def save_kmeans_scan_artifacts(
+	scan_records: list,
+	best_k: int,
+	save_dir: str,
+	data_path: Optional[str] = None,
+	appliance_name: Optional[str] = None,
+):
+	"""Persist KMeans-scan metrics as JSON and line chart."""
+	os.makedirs(save_dir, exist_ok=True)
+	payload = {
+		'scan_method': 'kmeans-scan',
+		'best_n_clusters': int(best_k),
+		'selection_rule': 'max_sci',
+		'data_source': {
+			'data_path': str(data_path) if data_path else None,
+			'appliance_name': str(appliance_name) if appliance_name else None,
+		},
+		'records': scan_records,
+	}
+	json_path = os.path.join(save_dir, 'kmeans_scan_metrics.json')
+	with open(json_path, 'w', encoding='utf-8') as f:
+		json.dump(payload, f, ensure_ascii=False, indent=2)
+	print(f"[TimeClustering] KMeans scan metrics saved to {json_path}")
+
+	ks = [r['n_clusters'] for r in scan_records]
+	sci_vals = [r['sci'] for r in scan_records]
+	dbi_vals = [r['dbi'] for r in scan_records]
+	chi_vals = [r['chi'] for r in scan_records]
+
+	fig, axes = plt.subplots(3, 1, figsize=(10, 12), dpi=150)
+	fig.suptitle('KMeans Scan Metrics', fontsize=14, fontweight='bold')
+
+	axes[0].plot(ks, sci_vals, marker='o', color='tab:blue')
+	axes[0].set_title('SCI (Silhouette) vs n_clusters')
+	axes[0].set_xlabel('n_clusters')
+	axes[0].set_ylabel('SCI (higher is better)')
+	axes[0].grid(alpha=0.3)
+
+	axes[1].plot(ks, dbi_vals, marker='o', color='tab:orange')
+	axes[1].set_title('DBI vs n_clusters')
+	axes[1].set_xlabel('n_clusters')
+	axes[1].set_ylabel('DBI (lower is better)')
+	axes[1].grid(alpha=0.3)
+
+	axes[2].plot(ks, chi_vals, marker='o', color='tab:green')
+	axes[2].set_title('CHI vs n_clusters')
+	axes[2].set_xlabel('n_clusters')
+	axes[2].set_ylabel('CHI (higher is better)')
+	axes[2].grid(alpha=0.3)
+
+	plt.tight_layout()
+	fig_path = os.path.join(save_dir, 'kmeans_scan_metrics.png')
+	plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+	plt.close(fig)
+	print(f"[TimeClustering] KMeans scan plot saved to {fig_path}")
+
+
+def save_dbscan_scan_artifacts(
+	scan_records: list,
+	best_eps: float,
+	save_dir: str,
+	data_path: Optional[str] = None,
+	appliance_name: Optional[str] = None,
+):
+	"""Persist DBSCAN-scan metrics as JSON and line charts."""
+	os.makedirs(save_dir, exist_ok=True)
+	payload = {
+		'scan_method': 'dbscan-scan',
+		'best_eps': float(best_eps),
+		'selection_rule': 'max_sci',
+		'data_source': {
+			'data_path': str(data_path) if data_path else None,
+			'appliance_name': str(appliance_name) if appliance_name else None,
+		},
+		'records': scan_records,
+	}
+	json_path = os.path.join(save_dir, 'dbscan_scan_metrics.json')
+	with open(json_path, 'w', encoding='utf-8') as f:
+		json.dump(payload, f, ensure_ascii=False, indent=2)
+	print(f"[TimeClustering] DBSCAN scan metrics saved to {json_path}")
+
+	x_vals = [float(r['eps']) for r in scan_records]
+	sci_vals = [np.nan if r['sci'] is None else float(r['sci']) for r in scan_records]
+	dbi_vals = [np.nan if r['dbi'] is None else float(r['dbi']) for r in scan_records]
+	chi_vals = [np.nan if r['chi'] is None else float(r['chi']) for r in scan_records]
+	n_noise_vals = [int(r['n_noise']) for r in scan_records]
+	n_cluster_vals = [int(r['n_clusters']) for r in scan_records]
+
+	fig, axes = plt.subplots(5, 1, figsize=(10, 18), dpi=150)
+	fig.suptitle('DBSCAN Scan Metrics', fontsize=14, fontweight='bold')
+
+	axes[0].plot(x_vals, sci_vals, marker='o', color='tab:blue')
+	axes[0].set_title('SCI (Silhouette) vs eps')
+	axes[0].set_xlabel('eps')
+	axes[0].set_ylabel('SCI (higher is better)')
+	axes[0].grid(alpha=0.3)
+
+	axes[1].plot(x_vals, dbi_vals, marker='o', color='tab:orange')
+	axes[1].set_title('DBI vs eps')
+	axes[1].set_xlabel('eps')
+	axes[1].set_ylabel('DBI (lower is better)')
+	axes[1].grid(alpha=0.3)
+
+	axes[2].plot(x_vals, chi_vals, marker='o', color='tab:green')
+	axes[2].set_title('CHI vs eps')
+	axes[2].set_xlabel('eps')
+	axes[2].set_ylabel('CHI (higher is better)')
+	axes[2].grid(alpha=0.3)
+
+	axes[3].plot(x_vals, n_noise_vals, marker='o', color='tab:red')
+	axes[3].set_title('n_noise vs eps')
+	axes[3].set_xlabel('eps')
+	axes[3].set_ylabel('n_noise')
+	axes[3].grid(alpha=0.3)
+
+	axes[4].plot(x_vals, n_cluster_vals, marker='o', color='tab:purple')
+	axes[4].set_title('n_clusters vs eps')
+	axes[4].set_xlabel('eps')
+	axes[4].set_ylabel('n_clusters')
+	axes[4].grid(alpha=0.3)
+
+	plt.tight_layout()
+	fig_path = os.path.join(save_dir, 'dbscan_scan_metrics.png')
+	plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+	plt.close(fig)
+	print(f"[TimeClustering] DBSCAN scan plot saved to {fig_path}")
+
+
 def visualize_cluster_results(
 	cluster_labels: np.ndarray,
 	valid_labels: np.ndarray,
@@ -300,21 +472,29 @@ def visualize_cluster_results(
 	dist_method: str = 'dtw',
 	col_index: int = 1,
 	sampling_threshold: int = 200,
-	visualize_noise: int = 2,
+	cluster_stack_count: int = 50,
+	visualize_noise: bool = True,
+	language: str = 'zh',
 	show: bool = True,
 ) -> None:
 	"""Render cluster center, stacked series, and tSNE visualizations."""
 	valid_org_data = valid_org_data[:, :, col_index]
 	org_data = org_data[:, :, col_index]
 	n_clusters = len(np.unique(valid_labels))
+	texts = _i18n(language)
 
-	plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+	if _normalize_language(language) == 'zh':
+		setup_chinese_font()
+	else:
+		plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 	plt.rcParams['axes.unicode_minus'] = False
 	cluster_colors = plt.cm.tab10(np.arange(n_clusters + 1))
 
+	center_title = texts['center_dtw'] if dist_method == 'dtw' else texts['center_mean']
+
 	figsize_height = max(8, n_clusters * 2)
 	fig, axes = plt.subplots(n_clusters, 1, figsize=(12, figsize_height))
-	fig.suptitle('时序聚类-各簇中心轮廓分布图 (DTW重心)', fontsize=14, fontweight='bold')
+	fig.suptitle(center_title, fontsize=14, fontweight='bold')
 	axes = [axes] if n_clusters == 1 else axes.flatten()
 
 	for i, cluster_id in enumerate(np.unique(valid_labels)):
@@ -335,11 +515,11 @@ def visualize_cluster_results(
 				cluster_center,
 				color=cluster_colors[cluster_id % 10],
 				linewidth=2.5,
-				label=f'簇 {cluster_id} (样本数:{len(valid_org_data[valid_labels == cluster_id])})',
+				label=f"{texts['cluster_prefix']} {cluster_id} ({texts['sample_count']}: {len(valid_org_data[valid_labels == cluster_id])})",
 			)
-			axes[i].set_title(f'簇 {cluster_id} 中心轮廓', fontsize=12)
-			axes[i].set_xlabel('时间步 / 序列长度', fontsize=10)
-			axes[i].set_ylabel('时序数值', fontsize=10)
+			axes[i].set_title(f"{texts['cluster_prefix']} {cluster_id} {texts['cluster_center_suffix']}", fontsize=12)
+			axes[i].set_xlabel(texts['time_step'], fontsize=10)
+			axes[i].set_ylabel(texts['series_value'], fontsize=10)
 			axes[i].legend(fontsize=9)
 			axes[i].grid(alpha=0.3, linestyle='--')
 
@@ -350,39 +530,40 @@ def visualize_cluster_results(
 		plt.show()
 	plt.close()
 
-	total_plots = n_clusters + 1 if visualize_noise > 0 else n_clusters
+	has_noise = np.any(cluster_labels == -1)
+	show_noise = bool(visualize_noise and has_noise)
+	stack_count = max(1, int(cluster_stack_count))
+	total_plots = n_clusters + 1 if show_noise else n_clusters
 	n_cols = min(3, total_plots)
 	n_rows = (total_plots + n_cols - 1) // n_cols
 	fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5 * n_rows))
-	fig.suptitle('各簇数据堆叠可视化（含噪声点）', fontsize=16, fontweight='bold')
+	stacked_title = texts['stacked_with_noise'] if has_noise else texts['stacked_without_noise']
+	fig.suptitle(stacked_title, fontsize=16, fontweight='bold')
 	axes = [axes] if total_plots == 1 else axes.flatten()
 
 	for i, cluster_id in enumerate(np.unique(valid_labels)):
 		cluster_seq = valid_org_data[valid_labels == cluster_id]
-		cluster_seq_subset = cluster_seq[:sampling_threshold]
+		cluster_seq_subset = cluster_seq[:stack_count]
 		for j, series in enumerate(cluster_seq_subset):
-			axes[i].plot(series, alpha=0.6, label=f'Series {j}' if j < 3 else '')
-		axes[i].set_title(f'Cluster {cluster_id} (前{len(cluster_seq_subset)}个数据)', fontsize=12)
-		axes[i].set_xlabel('时间步 / 序列长度', fontsize=10)
-		axes[i].set_ylabel('时序数值', fontsize=10)
+			axes[i].plot(series, alpha=0.6, label=f"{texts['series']} {j}" if j < 3 else '')
+		first_n = texts['first_n_data'].format(n=len(cluster_seq_subset))
+		axes[i].set_title(f"{texts['cluster_prefix']} {cluster_id} ({first_n})", fontsize=12)
+		axes[i].set_xlabel(texts['time_step'], fontsize=10)
+		axes[i].set_ylabel(texts['series_value'], fontsize=10)
 		axes[i].grid(alpha=0.3, linestyle='--')
 
-	if visualize_noise > 0:
+	if show_noise:
 		noise_idx = cluster_labels == -1
 		noise_ax = axes[n_clusters]
 		noise_seq = org_data[noise_idx]
-		noise_seq_subset = noise_seq[:sampling_threshold]
+		noise_seq_subset = noise_seq[:stack_count]
 		if len(noise_seq_subset) > 0:
-			if visualize_noise == 2:
-				for j, series in enumerate(noise_seq_subset):
-					noise_ax.plot(series, alpha=0.6, color='gray', label=f'Noise {j}' if j < 3 else '')
-				noise_ax.set_title(f'Noise Points (-1) (前{len(noise_seq_subset)}个数据)', fontsize=12)
-			else:
-				for j, series in enumerate(noise_seq_subset):
-					noise_ax.plot(series, alpha=0.6, label=f'Series {j}' if j < 3 else '')
-				noise_ax.set_title(f'Cluster {n_clusters} (前{len(noise_seq_subset)}个数据)', fontsize=12)
-			noise_ax.set_xlabel('时间步 / 序列长度', fontsize=10)
-			noise_ax.set_ylabel('时序数值', fontsize=10)
+			for j, series in enumerate(noise_seq_subset):
+				noise_ax.plot(series, alpha=0.6, color='gray', label=f"{texts['noise']} {j}" if j < 3 else '')
+			first_n = texts['first_n_data'].format(n=len(noise_seq_subset))
+			noise_ax.set_title(texts['noise_points_with_n'].format(first_n=first_n), fontsize=12)
+			noise_ax.set_xlabel(texts['time_step'], fontsize=10)
+			noise_ax.set_ylabel(texts['series_value'], fontsize=10)
 			noise_ax.grid(alpha=0.3, linestyle='--')
 
 	for j in range(total_plots, len(axes)):
@@ -411,7 +592,7 @@ def visualize_cluster_results(
 			tsne_2d[idx, 0],
 			tsne_2d[idx, 1],
 			c=[cluster_colors[cluster_id % 10]],
-			label=f'簇 {cluster_id}',
+			label=f"{texts['cluster_prefix']} {cluster_id}",
 			s=70,
 			alpha=0.8,
 			edgecolors='white',
@@ -419,24 +600,12 @@ def visualize_cluster_results(
 		)
 
 	noise_idx = cluster_labels == -1
-	if np.sum(noise_idx) > 0 and visualize_noise > 0:
-		if visualize_noise == 2:
-			plt.scatter(tsne_2d[noise_idx, 0], tsne_2d[noise_idx, 1], c='black', marker='x', label='噪声点', s=90, alpha=0.8)
-		else:
-			plt.scatter(
-				tsne_2d[noise_idx, 0],
-				tsne_2d[noise_idx, 1],
-				c=[cluster_colors[n_clusters % 10]],
-				label=f'簇 {n_clusters}',
-				s=70,
-				alpha=0.8,
-				edgecolors='white',
-				linewidth=0.5,
-			)
+	if show_noise:
+		plt.scatter(tsne_2d[noise_idx, 0], tsne_2d[noise_idx, 1], c='black', marker='x', label=texts['noise'], s=90, alpha=0.8)
 
-	plt.title('时序聚类-tSNE降维分布图 (特征矩阵)', fontsize=14, fontweight='bold')
-	plt.xlabel('tSNE维度1', fontsize=11)
-	plt.ylabel('tSNE维度2', fontsize=11)
+	plt.title(texts['tsne_title'], fontsize=14, fontweight='bold')
+	plt.xlabel(texts['tsne_dim1'], fontsize=11)
+	plt.ylabel(texts['tsne_dim2'], fontsize=11)
 	plt.legend(fontsize=10, loc='best')
 	plt.grid(alpha=0.2, linestyle='--')
 	plt.tight_layout()
@@ -454,10 +623,17 @@ def cluster_result_quantification(
 	feature_matrix: np.ndarray,
 	save_dir: Optional[str] = None,
 	seq_length: Optional[np.ndarray] = None,
+	dist_method: str = 'dtw',
+	cluster_method: str = 'unknown',
+	cluster_hyperparams: Optional[dict] = None,
+	language: str = 'zh',
 	col_index: int = 1,
 	visualize: bool = True,
-	visualize_noise: int = 2,
+	visualize_noise: bool = True,
+	cluster_stack_count: int = 50,
 	sampling_threshold: int = 200,
+	data_path: Optional[str] = None,
+	appliance_name: Optional[str] = None,
 ):
 	"""Unified entry for clustering quantification, metrics persistence and visualization."""
 	(
@@ -482,6 +658,13 @@ def cluster_result_quantification(
 	)
 
 	metrics = {
+		'clustering_method': str(cluster_method),
+		'clustering_hyperparameters': cluster_hyperparams if isinstance(cluster_hyperparams, dict) else {},
+		'distance_method_for_quantification': str(dist_method),
+		'data_source': {
+			'data_path': str(data_path) if data_path else None,
+			'appliance_name': str(appliance_name) if appliance_name else None,
+		},
 		'cluster_distribution': {
 			('noise' if int(label) == -1 else f'cluster_{int(label)}'): int(count)
 			for label, count in zip(*np.unique(cluster_labels, return_counts=True))
@@ -513,6 +696,7 @@ def cluster_result_quantification(
 			save_dir=save_dir if save_dir else './',
 			threshold=sampling_threshold,
 			col_index=col_index,
+			language=language,
 		)
 
 		visualize_cluster_results(
@@ -522,9 +706,12 @@ def cluster_result_quantification(
 			feature_matrix=feature_matrix,
 			org_data=org_data,
 			save_dir=save_dir,
+			dist_method=dist_method,
 			col_index=col_index,
 			sampling_threshold=sampling_threshold,
+			cluster_stack_count=cluster_stack_count,
 			visualize_noise=visualize_noise,
+			language=language,
 			show=False,
 		)
 
