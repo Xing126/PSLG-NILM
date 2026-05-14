@@ -133,13 +133,23 @@ def lstm_ae(data: np.ndarray, config: dict):
     # ===================== 8. 训练模型 =====================
     # 无监督学习：输入和标签都是原始数据
     # Masking 层会忽略填充值的重构误差
+    # 根据样本数量自动调整验证集比例
+    n_samples = X.shape[0]
+    if n_samples < 5:
+        print(f"[FeatureExtract] Warning: Too few samples ({n_samples}) for validation split. Disabling validation.")
+        current_val_split = 0.0
+        current_callbacks = [] # 样本太少时禁用早停，因为没有验证集
+    else:
+        current_val_split = 0.2
+        current_callbacks = [earliest_stop]
+
     history = lstm_autoencoder.fit(
         X, X,                    # 输入 = 标签（自编码器的特点）
         epochs=epochs,
         batch_size=batch_size,
         shuffle=True,             # 每个 epoch 打乱数据顺序
-        validation_split=0.2,    # 20% 数据作为验证集
-        callbacks=[earliest_stop] # 使用早停回调
+        validation_split=current_val_split,
+        callbacks=current_callbacks
     )
 
     # ===================== 9. 提取特征 =====================
@@ -153,7 +163,7 @@ def lstm_ae(data: np.ndarray, config: dict):
     # 构建训练历史信息字典
     training_history = {
         'loss': history.history['loss'],
-        'val_loss': history.history['val_loss'],
+        'val_loss': history.history.get('val_loss', history.history['loss']), # 如果没有 val_loss，用 loss 代替
         'epochs_trained': len(history.history['loss']),
         'model_name': 'LSTM'
     }

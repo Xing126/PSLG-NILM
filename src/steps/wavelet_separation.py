@@ -36,6 +36,7 @@ class WaveletSeparationStep(Step):
                 validation="score_threshold",
                 threshold=0.001,
                 distance=distance,
+                n_jobs=1,
             )
             clasp.fit_predict(time_series)
             return clasp.change_points
@@ -239,7 +240,9 @@ class WaveletSeparationStep(Step):
 
     def run(self, context: dict) -> dict:
         """Main execution logic for WaveletSeparationStep."""
-        input_dir = os.path.join(context['log_root'], 'DataLoader')
+        # Use input_root if available (e.g. from ExtractActiveDataStep), 
+        # otherwise fallback to DataLoader log dir (legacy)
+        input_dir = context.get('input_root', os.path.join(context['log_root'], 'DataLoader'))
         log_dir = self.get_log_dir(context)
         
         if not os.path.exists(input_dir):

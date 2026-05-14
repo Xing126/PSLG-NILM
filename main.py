@@ -14,7 +14,6 @@ if models_dir not in sys.path:
 
 from src.framework.workflow import Workflow
 from src.steps.extract_active_data_step import ExtractActiveDataStep
-from src.steps.data_loader import DataLoaderStep
 from src.steps.wavelet_separation import WaveletSeparationStep
 from src.steps.feature_extract_step import FeatureExtractStep
 from src.steps.time_clustering_step import TimeClusteringStep
@@ -53,9 +52,6 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
                 set_input_root=extract_active_cfg.get("set_input_root", True),
             )
         )
-
-    if config['steps']['data_loader'].get('enabled', True):
-        wf.add_step(DataLoaderStep("DataLoader", appliance_name=appliance_name))
 
     if config['steps'].get('wavelet_separation', {}).get('enabled', True):
         is_shape_dtw = config['steps']['wavelet_separation'].get('is_shape_dtw', False)
