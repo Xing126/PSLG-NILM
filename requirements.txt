@@ -14,3 +14,4 @@ claspy==0.2.7
 joblib==1.5.3
 stumpy>=1.0.0,<2.0.0
 PyYAML>=6.0
+hdbscan>=0.8.33
