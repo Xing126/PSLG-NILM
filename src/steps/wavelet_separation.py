@@ -259,8 +259,16 @@ class WaveletSeparationStep(Step):
             if 'power' not in df.columns:
                 print(f"Skipping {file_name}: 'power' column not found.")
                 continue
+            if 'timestamp' not in df.columns:
+                print(f"Skipping {file_name}: 'timestamp' column not found.")
+                continue
             
             signal = df['power'].values
+            timestamp_series = pd.to_numeric(df['timestamp'], errors='coerce')
+            if timestamp_series.isna().any():
+                print(f"Skipping {file_name}: 'timestamp' contains non-numeric values.")
+                continue
+            timestamp = timestamp_series.to_numpy(dtype=np.float64)
             
             # 1. Outlier removal (apply_diff=False logic: signal_cleaned = signal)
             signal_cleaned, _ = self.medfilt_outlier_removal(signal)
@@ -282,14 +290,15 @@ class WaveletSeparationStep(Step):
                 if end <= start:
                     continue
                 
-                # Slice and stack: (length, 4)
-                # 0: Original, 1: Cleaned, 2: Low-freq, 3: High-freq
+                # Slice and stack: (length, 5)
+                # 0: Timestamp, 1: Original, 2: Cleaned, 3: Low-freq, 4: High-freq
                 s_orig = signal[start:end]
                 s_cleaned = signal_cleaned[start:end]
                 s_low = low_freq[start:end]
                 s_high = high_freq[start:end]
+                s_timestamp = timestamp[start:end]
                 
-                sample = np.stack([s_orig, s_cleaned, s_low, s_high], axis=1)
+                sample = np.stack([s_timestamp, s_orig, s_cleaned, s_low, s_high], axis=1)
                 
                 all_samples.append(sample)
                 all_lengths.append(len(sample))
