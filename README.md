@@ -4,7 +4,7 @@
 
 ## 目录结构说明
 
-- `input/`: 原始输入数据文件夹（支持 `.csv` / `.npy` / `.txt` 格式，实际读取格式以 `DataLoaderStep` 为准）。
+- `input/`: 原始输入数据文件夹（支持 `.csv` / `.npy` / `.txt` 格式）。
 - `doc/`: 项目文档目录，包含各 Step 的详细输入输出说明。
 - `log/`: 存储工作流执行过程中的缓存文件和日志。
   - 每个执行序列号（时间戳标识）创建独立子文件夹。
@@ -50,19 +50,19 @@ pip install -r requirements.txt
 #### 方式 A：直接把 CSV 放入 input/（最简单）
 
 1. 将一个或多个电器的 CSV 文件放到 `input/` 目录下（每个文件至少包含 `timestamp,power` 两列）。
-2. 在 `config/config.yaml` 中开启 `steps.data_loader.enabled: true`。
+2. 在 `config/config.yaml` 中关闭 `steps.extract_active_data.enabled: false`。
 
-`DataLoaderStep` 会把 `input/` 下的 CSV 拷贝到本次运行的缓存目录，并加载到 `context['data']`。
+此时 `WaveletSeparationStep` 会直接从 `input/` 读取数据。
 
-#### 方式 B：用 ExtractActiveDataStep 从外部大 CSV 切割工作区间（UKDALE 场景）
+#### 方式 B：用 ExtractActiveDataStep 从外部大 CSV 切割工作区间
 
-适用于输入是 UKDALE 预提取目录（例如 `/home/scnu2023024258/data/datasets/ukdale_extracted/house1`）中某个电器的整段 CSV。
+适用于输入是整段大 CSV 的场景。
 
 1. 在 `config/config.yaml` 中开启 `steps.extract_active_data.enabled: true`。
 2. 设置 `steps.extract_active_data.input_file` 为目标电器的 `.csv` 文件路径（必须是文件路径，不是目录）。
-3. 建议同时开启 `steps.data_loader.enabled: true`，并保持 `steps.extract_active_data.set_input_root: true`（默认值）。
+3. 保持 `steps.extract_active_data.set_input_root: true`（默认值）。
 
-这样会先在 `log/.../ExtractActiveData/segments/` 生成切割后的多个 CSV，再由 `DataLoaderStep` 直接加载这些切割结果供后续步骤使用。
+这样会先在 `log/.../ExtractActiveData/segments/` 生成切割后的多个 CSV，再由后续步骤（如 `WaveletSeparationStep`）直接加载这些切割结果。
 
 ### 3. 配置工作流
 

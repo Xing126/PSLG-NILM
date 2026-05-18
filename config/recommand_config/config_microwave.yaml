@@ -25,8 +25,8 @@ steps:
 
   feature_extract:
     enabled: false
-    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\dishwasher\\data_fusion.npy"
-    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\dishwasher\\seq_length_fusion.npy"
+    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\microwave\\data_fusion.npy"
+    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\microwave\\seq_length_fusion.npy"
     model_name: "bilstm_ae"
     latent_dim: 64
     epochs: 50
@@ -37,9 +37,9 @@ steps:
   
   time_clustering:
     enabled: true
-    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\data_fusion.npy"
-    feature_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\bilstm_ae_attention_v2_features_cleaned_power_64_dim.npy"
-    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\seq_length_fusion.npy"
+    data_path: "input/microwave/data_fusion.npy"
+    feature_path: "input/microwave/autoencoder_features_cleaned_power_64_dim.npy"
+    seq_len_path: "input/microwave/seq_length_fusion.npy"
     cluster_method: "dbscan-scan"  # dbscan / dbscan-scan / kmeans / kmeans-scan
     method_specific:
       dbscan:
@@ -64,7 +64,7 @@ steps:
         n_init: 30
         max_iter: 300
     normalization_method: "zscore"
-    col_index: 2  # the index of the feature column to be used for clustering (0-based)
+    col_index: 3  # the index of the feature column to be used for clustering (0-based)
     visualization_specific:
       enabled: true
       visualize_noise: true
@@ -75,6 +75,36 @@ steps:
       method: "avg_percent"  # avg_percent / threshold
       n_percent: 50           # used when method=avg_percent
       threshold: 5            # used when method=threshold
+
+  primitive_activity_mapping:
+    enabled: false
+    # Folder containing activity CSV files. Each CSV uses column 0 as timestamp.
+    activity_sequence_dir: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\fluss_data"
+    # Folder containing primitive npy files (e.g., Cluster_*.npy from previous step).
+    primitive_sequence_dir: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\your_run\\TimeClustering"
+    # Strategy 1 (default): strict contain only. Strategy 2: tolerant contain with timestamp_tolerance.
+    enable_tolerant_match: false
+    timestamp_tolerance: 12.0
+
+  dataset_split:
+    enabled: false
+    # Appliance branch raw long-horizon time series file (.dat or .npy), shape (len, 2): [timestamp, power]
+    raw_series_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\raw_series.npy"
+    # Mains raw long-horizon time series file (.dat or .npy), shape (len, 2): [timestamp, power]
+    mains_series_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\input\\microwave\\mains_series.npy"
+    # If primitive_activity_mapping has run, these can be omitted and resolved from context.
+    few_shot_tensor_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\your_run\\PrimitiveActivityMapping\\few_shot_activity_tensor.npy"
+    non_few_shot_tensor_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\your_run\\PrimitiveActivityMapping\\non_few_shot_activity_tensor.npy"
+    # Event metadata with start/end timestamps. If omitted, resolve from context.
+    few_shot_activity_json_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\your_run\\PrimitiveActivityMapping\\few_shot_activity_sequences.json"
+    non_few_shot_activity_json_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\log\\your_run\\PrimitiveActivityMapping\\non_few_shot_activity_sequences.json"
+
+    # Tunable composition hyper-parameters.
+    few_train_ratio: 0.5
+    non_few_train_ratio: 0.8
+    random_seed: 42
+    timestamp_tolerance_seconds: 0.0
+    clip_negative_mains_to_zero: true
   
 
 # Model hyperparameters
