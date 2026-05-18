@@ -186,6 +186,55 @@ class TimeClusteringStep(Step):
                 f"Valid range is 0..{feature_dim - 1} for input shape {data_np.shape}."
             )
 
+    def build_series_list_from_data(self, data_np: np.ndarray, seq_len: np.ndarray) -> list:
+        """Build per-sample 1D power series for DTW-based clustering from raw data."""
+        if data_np is None or not isinstance(data_np, np.ndarray) or data_np.ndim < 2:
+            raise ValueError("[TimeClustering] data_np is required for DTW clustering and must be a numpy array.")
+
+        series_list = []
+        for i in range(len(data_np)):
+            base_data = data_np[i]
+            fallback_len = len(base_data)
+            actual_len = self._get_seq_length(seq_len, i, fallback_len)
+            clipped = base_data[:actual_len]
+
+            if clipped.ndim == 1:
+                series = clipped
+            elif clipped.ndim == 2:
+                series = clipped[:, self.col_index]
+            else:
+                raise ValueError(
+                    f"[TimeClustering] Unsupported sample ndim={clipped.ndim} for DTW clustering."
+                )
+
+            series = np.asarray(series, dtype=np.float64).reshape(-1)
+            if series.size == 0:
+                series = np.zeros(1, dtype=np.float64)
+            series = np.nan_to_num(series, nan=0.0, posinf=0.0, neginf=0.0)
+            series_list.append(series)
+
+        print(f"[TimeClustering] Built {len(series_list)} raw sequences for DTW clustering")
+        return series_list
+
+    def build_eval_matrix_from_series(self, series_list: list) -> np.ndarray:
+        """Build (n_sample, len) matrix from raw sequences for DBI/CHI evaluation."""
+        if not series_list:
+            return np.empty((0, 0), dtype=np.float64)
+
+        max_len = max(len(np.asarray(seq).reshape(-1)) for seq in series_list)
+        if max_len <= 0:
+            max_len = 1
+
+        eval_matrix = np.zeros((len(series_list), max_len), dtype=np.float64)
+        for i, seq in enumerate(series_list):
+            arr = np.asarray(seq, dtype=np.float64).reshape(-1)
+            if arr.size == 0:
+                continue
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+            eval_matrix[i, :arr.size] = arr
+
+        return eval_matrix
+
     def normalize_features(self, feature_matrix: np.ndarray) -> list:
         """Normalize feature matrix using specified method."""
         if feature_matrix is None or feature_matrix.size == 0:
@@ -310,6 +359,33 @@ class TimeClusteringStep(Step):
 
         return labels
 
+    def run_kmeans_dtw(self, dist_matrix: np.ndarray) -> np.ndarray:
+        """Execute KMeans on DTW-distance representation (rows of precomputed distance matrix)."""
+        print(
+            "[TimeClustering] Running KMeans on precomputed DTW-distance representation with "
+            f"n_clusters={self.kmeans_n_clusters}, random_state={self.kmeans_random_state}, "
+            f"n_init={self.kmeans_n_init}, max_iter={self.kmeans_max_iter}"
+        )
+
+        kmeans_model = KMeans(
+            n_clusters=self.kmeans_n_clusters,
+            random_state=self.kmeans_random_state,
+            n_init=self.kmeans_n_init,
+            max_iter=self.kmeans_max_iter,
+        )
+        labels = kmeans_model.fit_predict(dist_matrix)
+
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = int(np.sum(labels == -1))
+        print(f"[TimeClustering] Clustering complete: {n_clusters} clusters, {n_noise} noise points")
+
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        for label, count in zip(unique_labels, counts):
+            label_name = "noise" if label == -1 else f"cluster_{label}"
+            print(f"  {label_name}: {count} samples")
+
+        return labels
+
     def run_kmeans_scan(self, feature_matrix: np.ndarray, save_dir: str) -> tuple:
         """Scan n_clusters in [min_cluster, max_cluster], save metrics JSON/plot, and return best labels."""
         min_k = int(self.min_cluster)
@@ -330,8 +406,6 @@ class TimeClusteringStep(Step):
         best_score = -np.inf
         best_k = None
         best_labels = None
-        dist_matrix = cdist(feature_matrix, feature_matrix, metric='euclidean')
-
         print(f"[TimeClustering] Running KMeans scan from k={min_k} to k={max_k}")
 
         for k in range(min_k, max_k + 1):
@@ -350,21 +424,20 @@ class TimeClusteringStep(Step):
             sci = silhouette_score(feature_matrix, labels, metric='euclidean')
             dbi = davies_bouldin_score(feature_matrix, labels)
             chi = calinski_harabasz_score(feature_matrix, labels)
-            dbcv = clustering_utils.calculate_dbcv_score(dist_matrix=dist_matrix, cluster_labels=labels)
 
             record = {
                 'n_clusters': int(k),
                 'sci': float(sci),
                 'dbi': float(dbi),
                 'chi': float(chi),
-                'dbcv': (None if dbcv is None else float(dbcv)),
+                'dbcv': None,
             }
             scan_records.append(record)
 
             print(
                 f"[TimeClustering] k={k} -> "
                 f"SCI={record['sci']:.6f}, DBI={record['dbi']:.6f}, CHI={record['chi']:.6f}"
-                f", DBCV={record['dbcv']}"
+                ", DBCV=None"
             )
 
             # Choose best k by SCI (higher is better)
@@ -375,6 +448,77 @@ class TimeClusteringStep(Step):
 
         if best_labels is None:
             raise ValueError("[TimeClustering] KMeans scan failed: no valid k in scan range.")
+
+        scan_payload = clustering_utils.save_kmeans_scan_artifacts(
+            scan_records,
+            best_k,
+            save_dir,
+            data_path=self.data_path,
+            appliance_name=self.appliance_name,
+        )
+        return best_labels, best_k, scan_records, scan_payload
+
+    def run_kmeans_scan_dtw(self, dist_matrix: np.ndarray, eval_feature_matrix: np.ndarray, save_dir: str) -> tuple:
+        """Scan KMeans on precomputed DTW-distance representation in [min_cluster, max_cluster]."""
+
+        min_k = int(self.min_cluster)
+        max_k = int(self.max_cluster)
+        n_samples = int(dist_matrix.shape[0])
+
+        if min_k < 2:
+            raise ValueError(f"[TimeClustering] min_cluster must be >= 2, got {min_k}")
+        if max_k < min_k:
+            raise ValueError(f"[TimeClustering] max_cluster must be >= min_cluster, got {max_k} < {min_k}")
+        if min_k >= n_samples:
+            raise ValueError(
+                f"[TimeClustering] min_cluster={min_k} is invalid for n_samples={n_samples}. "
+                "min_cluster must be less than number of samples."
+            )
+
+        scan_records = []
+        best_score = -np.inf
+        best_k = None
+        best_labels = None
+        print(f"[TimeClustering] Running DTW KMeans scan from k={min_k} to k={max_k}")
+
+        for k in range(min_k, max_k + 1):
+            if k >= n_samples:
+                print(f"[TimeClustering] Skip k={k}: requires k < n_samples ({n_samples})")
+                continue
+
+            kmeans_model = KMeans(
+                n_clusters=k,
+                random_state=self.kmeans_random_state,
+                n_init=self.kmeans_n_init,
+                max_iter=self.kmeans_max_iter,
+            )
+            labels = kmeans_model.fit_predict(dist_matrix)
+
+            sci = float(silhouette_score(dist_matrix, labels, metric='precomputed'))
+            dbi = float(davies_bouldin_score(eval_feature_matrix, labels))
+            chi = float(calinski_harabasz_score(eval_feature_matrix, labels))
+
+            record = {
+                'n_clusters': int(k),
+                'sci': sci,
+                'dbi': dbi,
+                'chi': chi,
+                'dbcv': None,
+            }
+            scan_records.append(record)
+
+            print(
+                f"[TimeClustering] k={k} -> "
+                f"SCI={record['sci']:.6f}, DBI={record['dbi']:.6f}, CHI={record['chi']:.6f}, DBCV=None"
+            )
+
+            if sci > best_score:
+                best_score = sci
+                best_k = int(k)
+                best_labels = labels
+
+        if best_labels is None:
+            raise ValueError("[TimeClustering] DTW KMeans scan failed: no valid k in scan range.")
 
         scan_payload = clustering_utils.save_kmeans_scan_artifacts(
             scan_records,
@@ -430,7 +574,7 @@ class TimeClusteringStep(Step):
                     sci = float(silhouette_score(valid_dist, valid_labels, metric='precomputed'))
                     dbi = float(davies_bouldin_score(valid_feature, valid_labels))
                     chi = float(calinski_harabasz_score(valid_feature, valid_labels))
-                    dbcv = clustering_utils.calculate_dbcv_score(dist_matrix=dist_matrix, cluster_labels=labels)
+                    dbcv = None
 
             record = {
                 'eps': eps_val,
@@ -480,7 +624,7 @@ class TimeClusteringStep(Step):
 
         try:
             quant_dist_method = 'euclidean'
-            if self.cluster_method == 'dbscan' and self.metric in ('dtw', 'fastdtw'):
+            if self.cluster_method in ('dbscan', 'dbscan-scan', 'dbscan_scan', 'kmeans', 'kmeans-scan', 'kmeans_scan') and self.metric in ('dtw', 'fastdtw'):
                 quant_dist_method = 'dtw'
 
             if self.cluster_method == 'dbscan':
@@ -633,38 +777,74 @@ class TimeClusteringStep(Step):
         # Validate visualization/index selection early to fail fast with clear diagnostics.
         self._validate_col_index(data_np)
 
-        if data_np is None or feature_matrix is None:
-            print("[TimeClustering] Error: Required data not found. Please provide feature data.")
+        use_dtw_data = self.metric in ('dtw', 'fastdtw')
+        normalized_feature_list = None
+        normalized_feature_matrix = None
+        ts_list = None
+        eval_feature_matrix = feature_matrix
+
+        if data_np is None:
+            print("[TimeClustering] Error: Required raw data not found. Please provide data_path/context data.")
             return context
 
-        if feature_matrix.size == 0:
-            print("[TimeClustering] Error: Feature matrix is empty.")
-            return context
+        if (feature_matrix is not None) and feature_matrix.size == 0:
+            feature_matrix = None
+            eval_feature_matrix = None
 
-        normalized_feature_list = self.normalize_features(feature_matrix)
+        if use_dtw_data:
+            if data_np is None:
+                print("[TimeClustering] Error: DTW clustering requires data_path/context data.")
+                return context
+            ts_list = self.build_series_list_from_data(data_np, seq_len)
+            eval_feature_matrix = self.build_eval_matrix_from_series(ts_list)
+            print(
+                "[TimeClustering] Built DTW evaluation matrix from raw series, "
+                f"shape={eval_feature_matrix.shape}"
+            )
+        else:
+            if feature_matrix is None:
+                print("[TimeClustering] Error: Required feature data not found for non-DTW clustering.")
+                return context
+            normalized_feature_list = self.normalize_features(feature_matrix)
 
-        if not normalized_feature_list:
-            print("[TimeClustering] Error: No valid features after normalization.")
-            return context
+            if not normalized_feature_list:
+                print("[TimeClustering] Error: No valid features after normalization.")
+                return context
 
-        normalized_feature_matrix = np.asarray(normalized_feature_list)
+            normalized_feature_matrix = np.asarray(normalized_feature_list)
 
         if self.cluster_method == 'dbscan':
-            dist_matrix = self.get_distance_matrix(
-                normalized_feature_list,
-                metric=self.metric,
-                cache_dir=save_dir
-            )
+            if use_dtw_data:
+                dist_matrix = self.get_distance_matrix(
+                    ts_list,
+                    metric='dtw',
+                    cache_dir=save_dir
+                )
+            else:
+                dist_matrix = self.get_distance_matrix(
+                    normalized_feature_list,
+                    metric=self.metric,
+                    cache_dir=save_dir
+                )
             labels = self.run_dbscan(dist_matrix, self.eps, self.min_pts)
         elif self.cluster_method in ('dbscan-scan', 'dbscan_scan'):
-            dist_matrix = self.get_distance_matrix(
-                normalized_feature_list,
-                metric=self.metric,
-                cache_dir=save_dir
-            )
+            if use_dtw_data:
+                dist_matrix = self.get_distance_matrix(
+                    ts_list,
+                    metric='dtw',
+                    cache_dir=save_dir
+                )
+                scan_feature_matrix = eval_feature_matrix
+            else:
+                dist_matrix = self.get_distance_matrix(
+                    normalized_feature_list,
+                    metric=self.metric,
+                    cache_dir=save_dir
+                )
+                scan_feature_matrix = normalized_feature_matrix
             _labels, best_eps, scan_records, scan_payload = self.run_dbscan_scan(
                 dist_matrix=dist_matrix,
-                feature_matrix=normalized_feature_matrix,
+                feature_matrix=scan_feature_matrix,
                 save_dir=save_dir,
             )
             self.selected_scan_eps = float(best_eps)
@@ -680,11 +860,23 @@ class TimeClusteringStep(Step):
             print("[TimeClustering] DBSCAN scan mode completed (scan artifacts only)")
             return context
         elif self.cluster_method == 'kmeans':
-            labels = self.run_kmeans(normalized_feature_matrix)
-            # Keep quantification path unified by building a precomputed distance matrix.
-            dist_matrix = cdist(normalized_feature_matrix, normalized_feature_matrix, metric='euclidean')
+            if use_dtw_data:
+                dist_matrix = self.get_distance_matrix(ts_list, metric='dtw', cache_dir=save_dir)
+                labels = self.run_kmeans_dtw(dist_matrix)
+            else:
+                labels = self.run_kmeans(normalized_feature_matrix)
+                # Keep quantification path unified by building a precomputed distance matrix.
+                dist_matrix = cdist(normalized_feature_matrix, normalized_feature_matrix, metric='euclidean')
         elif self.cluster_method in ('kmeans-scan', 'kmeans_scan'):
-            _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan(normalized_feature_matrix, save_dir)
+            if use_dtw_data:
+                dist_matrix = self.get_distance_matrix(ts_list, metric='dtw', cache_dir=save_dir)
+                _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan_dtw(
+                    dist_matrix,
+                    eval_feature_matrix,
+                    save_dir,
+                )
+            else:
+                _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan(normalized_feature_matrix, save_dir)
             self.kmeans_n_clusters = int(best_k)
 
             # In scan mode, only export scan artifacts (JSON + line chart),
@@ -706,7 +898,7 @@ class TimeClusteringStep(Step):
             labels,
             dist_matrix,
             data_np,
-            feature_matrix,
+            eval_feature_matrix,
             seq_len,
             save_dir,
             enable_visualization=self.enable_visualization

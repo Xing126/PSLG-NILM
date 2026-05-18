@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
 
 from src.framework.step import Step
 
@@ -16,11 +17,17 @@ class ApplianceDataSegmenter:
         power_threshold: float = 1.0,
         min_duration_seconds: int = 30,
         context_seconds: int = 120,
+        alpha: float = 0.2,
+        min_stop_time: int = 5,
+        sample_rate: int = 10,
     ):
         self.appliance_name = appliance_name
         self.power_threshold = power_threshold
         self.min_duration_seconds = min_duration_seconds
         self.context_seconds = context_seconds
+        self.alpha = alpha
+        self.min_stop_time = min_stop_time
+        self.sample_rate = sample_rate
 
     def process_dataset(self, input_file: str, output_dir: str) -> List[str]:
         os.makedirs(output_dir, exist_ok=True)
@@ -96,39 +103,119 @@ class ApplianceDataSegmenter:
             return [(int(row[0]), float(row[1])) for row in data_array]
         raise ValueError("NPY 文件格式不正确，需要至少两列数据")
 
+    def _estimate_monthly_thresholds(self, monthly_series: pd.Series) -> Tuple[float, float]:
+        """核心一步：动态计算单月的自适应阈值"""
+        # 过滤空值
+        valid_data = monthly_series.dropna().values
+        if len(valid_data) < 100:  # 数据量过少，返回兜底默认值
+            return self.power_threshold, self.power_threshold * 3
+
+        # 1. 提取底噪基准（25%分位数，基本就是纯待机状态）
+        bg_baseline = np.percentile(valid_data, 25)
+
+        # 2. 采样加速聚类：每隔 sample_rate 个点抽一个，应付几百万数据轻轻松松
+        sampled_data = valid_data[:: self.sample_rate].reshape(-1, 1)
+
+        # 3. 用极速聚类区分“背景”与“工作”
+        kmeans = KMeans(n_clusters=2, n_init=5, random_state=42)
+        kmeans.fit(sampled_data)
+        centers = np.sort(kmeans.cluster_centers_.flatten())
+
+        # centers[0] 是背景中心，centers[1] 是工作中心
+        bg_center, work_center = centers[0], centers[1]
+
+        # 4. 根据两级中心，按比例动态计算阈值（可根据实际效果微调比例）
+        p_low = bg_center + (work_center - bg_center) * 0.15
+        p_high = bg_center + (work_center - bg_center) * 0.40
+
+        # 安全兜底：防止某些月份洗碗机一次没开过导致聚类失效
+        p_low = max(p_low, bg_baseline + 5.0)
+        p_high = max(p_high, p_low + 10.0)
+
+        return p_low, p_high
+
+    def _extract_periods_with_thresholds(self, df_month: pd.DataFrame, p_low: float, p_high: float) -> List[Tuple[int, int, int, int, int]]:
+        """利用当前月阈值执行单向状态机扫描"""
+        timestamps = df_month["timestamp"].values
+        powers = df_month["power"].values
+        orig_indices = df_month["orig_idx"].values
+
+        periods = []
+        status = "BACKGROUND"
+        ema = powers[0]
+        start_idx = None
+        cooldown_counter = 0
+
+        for i in range(1, len(powers)):
+            # 更新 EMA
+            ema = self.alpha * powers[i] + (1 - self.alpha) * ema
+
+            if status == "BACKGROUND":
+                if ema > p_high:
+                    status = "WORKING"
+                    start_idx = i
+                    cooldown_counter = 0
+            elif status == "WORKING":
+                if ema < p_low:
+                    cooldown_counter += 1
+                    if cooldown_counter >= self.min_stop_time:
+                        status = "BACKGROUND"
+                        # 回溯真正结束的时间
+                        end_idx_in_month = max(0, i - self.min_stop_time)
+                        
+                        s_idx = orig_indices[start_idx]
+                        e_idx = orig_indices[end_idx_in_month]
+                        s_time = timestamps[start_idx]
+                        e_time = timestamps[end_idx_in_month]
+                        duration = max(0, e_time - s_time)
+                        
+                        if duration >= self.min_duration_seconds:
+                            periods.append((int(s_idx), int(e_idx), int(s_time), int(e_time), int(duration)))
+                else:
+                    cooldown_counter = 0
+
+        # 闭合月末仍在运行的区间
+        if status == "WORKING":
+            end_idx_in_month = len(powers) - 1
+            s_idx = orig_indices[start_idx]
+            e_idx = orig_indices[end_idx_in_month]
+            s_time = timestamps[start_idx]
+            e_time = timestamps[end_idx_in_month]
+            duration = max(0, e_time - s_time)
+            if duration >= self.min_duration_seconds:
+                periods.append((int(s_idx), int(e_idx), int(s_time), int(e_time), int(duration)))
+
+        return periods
+
     def _detect_working_segments_from_data(
         self, data: List[Tuple[int, float]]
     ) -> List[Tuple[int, int, int, int, int]]:
-        segments: List[Tuple[int, int, int, int, int]] = []
-        current_segment_start: Optional[int] = None
+        if not data:
+            return []
 
-        for i, (timestamp, power) in enumerate(data):
-            if i % 1000000 == 0:
-                print(f"已处理 {i} 个数据点...")
+        # Convert to DataFrame for processing
+        df = pd.DataFrame(data, columns=["timestamp", "power"])
+        df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
+        df["orig_idx"] = np.arange(len(df))
+        df.set_index("datetime", inplace=True)
 
-            if power >= self.power_threshold:
-                if current_segment_start is None:
-                    current_segment_start = i
+        all_periods = []
+        # 按月分组遍历
+        grouped = df.groupby(df.index.to_period("M"))
+
+        for month, df_month in grouped:
+            if len(df_month) < 2:
                 continue
 
-            if current_segment_start is not None:
-                segment_end = i - 1
-                start_time = data[current_segment_start][0]
-                end_time = data[segment_end][0]
-                duration_seconds = max(0, end_time - start_time)
-                if duration_seconds >= self.min_duration_seconds:
-                    segments.append((current_segment_start, segment_end, start_time, end_time, duration_seconds))
-                current_segment_start = None
+            # 1. 动态计算当月阈值
+            p_low, p_high = self._estimate_monthly_thresholds(df_month["power"])
+            print(f"月份 {month}: 动态阈值 p_low={p_low:.2f}, p_high={p_high:.2f}")
 
-        if current_segment_start is not None:
-            segment_end = len(data) - 1
-            start_time = data[current_segment_start][0]
-            end_time = data[segment_end][0]
-            duration_seconds = max(0, end_time - start_time)
-            if duration_seconds >= self.min_duration_seconds:
-                segments.append((current_segment_start, segment_end, start_time, end_time, duration_seconds))
+            # 2. 用当月阈值跑状态机
+            month_periods = self._extract_periods_with_thresholds(df_month, p_low, p_high)
+            all_periods.extend(month_periods)
 
-        return segments
+        return all_periods
 
     def _extract_all_segments_from_data(
         self,
@@ -207,6 +294,9 @@ class ExtractActiveDataStep(Step):
         power_threshold: float = 1.0,
         min_duration_seconds: int = 30,
         context_seconds: int = 120,
+        alpha: float = 0.2,
+        min_stop_time: int = 5,
+        sample_rate: int = 10,
         set_input_root: bool = True,
     ):
         super().__init__(name)
@@ -215,6 +305,9 @@ class ExtractActiveDataStep(Step):
         self.power_threshold = power_threshold
         self.min_duration_seconds = min_duration_seconds
         self.context_seconds = context_seconds
+        self.alpha = alpha
+        self.min_stop_time = min_stop_time
+        self.sample_rate = sample_rate
         self.set_input_root = set_input_root
 
     def restore(self, context: dict) -> dict:
@@ -256,6 +349,9 @@ class ExtractActiveDataStep(Step):
             power_threshold=self.power_threshold,
             min_duration_seconds=self.min_duration_seconds,
             context_seconds=self.context_seconds,
+            alpha=self.alpha,
+            min_stop_time=self.min_stop_time,
+            sample_rate=self.sample_rate,
         )
         output_files = segmenter.process_dataset(self.input_file, segments_dir)
 

@@ -780,7 +780,11 @@ def cluster_result_quantification(
 		valid_feature_matrix=valid_feature_matrix,
 		cluster_labels=cluster_labels,
 	)
-	dbcv_score = calculate_dbcv_score(dist_matrix=dist_matrix, cluster_labels=cluster_labels)
+	method_name = str(cluster_method).lower()
+	if method_name in ('hdbscan', 'hdbscan-scan', 'hdbscan_scan'):
+		dbcv_score = calculate_dbcv_score(dist_matrix=dist_matrix, cluster_labels=cluster_labels)
+	else:
+		dbcv_score = None
 
 	metrics = {
 		'clustering_method': str(cluster_method),
