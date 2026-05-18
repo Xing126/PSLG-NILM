@@ -1,35 +1,44 @@
 import os
-import bisect
+import gc
 from datetime import datetime
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import KMeans
 
 from src.framework.step import Step
 
 
 class ApplianceDataSegmenter:
-    def __init__(
-        self,
-        appliance_name: str,
-        power_threshold: float = 1.0,
-        min_duration_seconds: int = 30,
-        context_seconds: int = 120,
-        alpha: float = 0.2,
-        min_stop_time: int = 5,
-        sample_rate: int = 10,
-    ):
+    def __init__(self, appliance_name: str, power_threshold: float = 1.0,
+                 min_duration_seconds: int = 30,
+                 context_seconds: int = 120):
+        """
+        电器数据切割器
+
+        Args:
+            appliance_name: 电器名称，用于文件命名
+            power_threshold: 功率阈值，用于检测工作状态开始和结束
+            min_duration_seconds: 最小持续时间(秒)，避免噪声误判
+            context_seconds: 上下文时间(秒)，在工作区间前后额外包含的数据
+        """
         self.appliance_name = appliance_name
         self.power_threshold = power_threshold
         self.min_duration_seconds = min_duration_seconds
         self.context_seconds = context_seconds
-        self.alpha = alpha
-        self.min_stop_time = min_stop_time
-        self.sample_rate = sample_rate
 
     def process_dataset(self, input_file: str, output_dir: str) -> List[str]:
+        """
+        处理数据集并分割工作区间
+
+        Args:
+            input_file: 输入文件路径，支持 .dat、.csv 和 .npy 格式
+            output_dir: 输出目录
+
+        Returns:
+            生成的CSV文件路径列表
+        """
+        # 确保输出目录存在
         os.makedirs(output_dir, exist_ok=True)
 
         print(f"开始处理电器数据: {self.appliance_name}")
@@ -38,32 +47,62 @@ class ApplianceDataSegmenter:
         print(f"功率阈值: {self.power_threshold}")
         print(f"最小持续时间: {self.min_duration_seconds}秒")
         print(f"上下文: ±{self.context_seconds}秒")
+        print("-" * 50)
 
+        # 第一步：读取数据
+        print("第一步：读取数据...")
         data = self._read_data(input_file)
         print(f"成功读取 {len(data)} 个数据点")
 
+        # 第二步：检测所有工作区间
+        print("第二步：检测工作区间...")
         segments = self._detect_working_segments_from_data(data)
+
         print(f"检测到 {len(segments)} 个潜在工作区间")
 
+        # 第三步：提取并保存工作区间数据
+        print("第三步：提取并保存工作区间数据...")
         output_files = self._extract_all_segments_from_data(data, segments, output_dir)
+
         print(f"处理完成！共提取 {len(output_files)} 个工作区间")
         return output_files
 
     def _read_data(self, input_file: str) -> List[Tuple[int, float]]:
-        file_ext = os.path.splitext(input_file)[1].lower()
-        print(f"检测到文件格式: {file_ext}")
+        """
+        读取不同格式的数据文件
 
-        if file_ext == ".dat":
+        Args:
+            input_file: 输入文件路径
+
+        Returns:
+            数据列表，每个元素是 (timestamp, power) 元组
+        """
+        file_ext = os.path.splitext(input_file)[1].lower()
+        
+        print(f"检测到文件格式: {file_ext}")
+        
+        if file_ext == '.dat':
             return self._read_dat_file(input_file)
-        if file_ext == ".csv":
+        elif file_ext == '.csv':
             return self._read_csv_file(input_file)
-        if file_ext == ".npy":
+        elif file_ext == '.npy':
             return self._read_npy_file(input_file)
-        raise ValueError(f"不支持的文件格式: {file_ext}，仅支持 .dat、.csv 和 .npy 格式")
+        else:
+            raise ValueError(f"不支持的文件格式: {file_ext}，仅支持 .dat、.csv 和 .npy 格式")
 
     def _read_dat_file(self, input_file: str) -> List[Tuple[int, float]]:
-        data: List[Tuple[int, float]] = []
-        with open(input_file, "r") as f:
+        """
+        读取 .dat 文件
+
+        Args:
+            input_file: 输入 .dat 文件路径
+
+        Returns:
+            数据列表，每个元素是 (timestamp, power) 元组
+        """
+        data = []
+        
+        with open(input_file, 'r') as f:
             line_count = 0
             for line in f:
                 line_count += 1
@@ -80,209 +119,179 @@ class ApplianceDataSegmenter:
                     data.append((timestamp, power))
                 except (ValueError, IndexError):
                     continue
-
+        
         return data
 
     def _read_csv_file(self, input_file: str) -> List[Tuple[int, float]]:
-        df = pd.read_csv(input_file)
-        if "timestamp" in df.columns and "power" in df.columns:
-            df = df[["timestamp", "power"]]
-        else:
-            df = df.iloc[:, [0, 1]]
-            df.columns = ["timestamp", "power"]
+        """
+        读取 .csv 文件
 
-        df = df.dropna(subset=["timestamp", "power"])
-        df["timestamp"] = df["timestamp"].astype(np.int64)
-        df["power"] = df["power"].astype(np.float64)
-        df = df.sort_values("timestamp")
-        return list(zip(df["timestamp"].tolist(), df["power"].tolist()))
+        Args:
+            input_file: 输入 .csv 文件路径
+
+        Returns:
+            数据列表，每个元素是 (timestamp, power) 元组
+        """
+        try:
+            df = pd.read_csv(input_file)
+            # 确保列名正确
+            if 'timestamp' in df.columns and 'power' in df.columns:
+                data = [(int(row['timestamp']), float(row['power'])) for _, row in df.iterrows()]
+            else:
+                # 假设第一列是 timestamp，第二列是 power
+                data = [(int(row[0]), float(row[1])) for _, row in df.iterrows()]
+            return data
+        except Exception as e:
+            raise ValueError(f"读取 CSV 文件失败: {e}")
 
     def _read_npy_file(self, input_file: str) -> List[Tuple[int, float]]:
-        data_array = np.load(input_file)
-        if data_array.ndim == 2 and data_array.shape[1] >= 2:
-            return [(int(row[0]), float(row[1])) for row in data_array]
-        raise ValueError("NPY 文件格式不正确，需要至少两列数据")
+        """
+        读取 .npy 文件
 
-    def _estimate_monthly_thresholds(self, monthly_series: pd.Series) -> Tuple[float, float]:
-        """核心一步：动态计算单月的自适应阈值"""
-        # 过滤空值
-        valid_data = monthly_series.dropna().values
-        if len(valid_data) < 100:  # 数据量过少，返回兜底默认值
-            return self.power_threshold, self.power_threshold * 3
+        Args:
+            input_file: 输入 .npy 文件路径
 
-        # 1. 提取底噪基准（25%分位数，基本就是纯待机状态）
-        bg_baseline = np.percentile(valid_data, 25)
+        Returns:
+            数据列表，每个元素是 (timestamp, power) 元组
+        """
+        try:
+            data_array = np.load(input_file)
+            # 确保数据格式正确
+            if data_array.ndim == 2 and data_array.shape[1] >= 2:
+                data = [(int(row[0]), float(row[1])) for row in data_array]
+                return data
+            else:
+                raise ValueError(f"NPY 文件格式不正确，需要至少两列数据")
+        except Exception as e:
+            raise ValueError(f"读取 NPY 文件失败: {e}")
 
-        # 2. 采样加速聚类：每隔 sample_rate 个点抽一个，应付几百万数据轻轻松松
-        sampled_data = valid_data[:: self.sample_rate].reshape(-1, 1)
+    def _detect_working_segments_from_data(self, data: List[Tuple[int, float]]) -> List[Tuple[int, int, int, int, int]]:
+        """
+        从数据列表中检测所有工作区间
 
-        # 3. 用极速聚类区分“背景”与“工作”
-        kmeans = KMeans(n_clusters=2, n_init=5, random_state=42)
-        kmeans.fit(sampled_data)
-        centers = np.sort(kmeans.cluster_centers_.flatten())
+        Args:
+            data: 数据列表，每个元素是 (timestamp, power) 元组
 
-        # centers[0] 是背景中心，centers[1] 是工作中心
-        bg_center, work_center = centers[0], centers[1]
+        Returns:
+            列表格式: [(start_idx, end_idx, start_time, end_time, duration), ...]
+        """
+        segments = []
+        current_segment_start = None
+        current_segment_start_time = None
+        consecutive_above_count = 0
 
-        # 4. 根据两级中心，按比例动态计算阈值（可根据实际效果微调比例）
-        p_low = bg_center + (work_center - bg_center) * 0.15
-        p_high = bg_center + (work_center - bg_center) * 0.40
+        print("正在检测工作区间...")
 
-        # 安全兜底：防止某些月份洗碗机一次没开过导致聚类失效
-        p_low = max(p_low, bg_baseline + 5.0)
-        p_high = max(p_high, p_low + 10.0)
+        for i, (timestamp, power) in enumerate(data):
+            if i % 1000000 == 0:
+                print(f"已处理 {i} 个数据点...")
 
-        return p_low, p_high
+            if power >= self.power_threshold:
+                if current_segment_start is None:
+                    current_segment_start = i  # 0-based index
+                    current_segment_start_time = timestamp
+                consecutive_above_count += 1
+            else:
+                # 检查是否结束了一个有效的工作区间
+                if (current_segment_start is not None and
+                        consecutive_above_count >= self.min_duration_seconds):
+                    segment_end = i - 1  # 上一个数据点是结束点
+                    segment_end_time = timestamp
+                    duration = consecutive_above_count
+                    segments.append((
+                        current_segment_start,
+                        segment_end,
+                        current_segment_start_time,
+                        segment_end_time,
+                        duration
+                    ))
 
-    def _extract_periods_with_thresholds(self, df_month: pd.DataFrame, p_low: float, p_high: float) -> List[Tuple[int, int, int, int, int]]:
-        """利用当前月阈值执行单向状态机扫描"""
-        timestamps = df_month["timestamp"].values
-        powers = df_month["power"].values
-        orig_indices = df_month["orig_idx"].values
+                current_segment_start = None
+                current_segment_start_time = None
+                consecutive_above_count = 0
 
-        periods = []
-        status = "BACKGROUND"
-        ema = powers[0]
-        start_idx = None
-        cooldown_counter = 0
+        # 处理数据末尾可能的工作区间
+        if (current_segment_start is not None and
+                consecutive_above_count >= self.min_duration_seconds):
+            segment_end = len(data) - 1
+            segment_end_time = data[-1][0]
+            duration = consecutive_above_count
+            segments.append((
+                current_segment_start,
+                segment_end,
+                current_segment_start_time,
+                segment_end_time,
+                duration
+            ))
 
-        for i in range(1, len(powers)):
-            # 更新 EMA
-            ema = self.alpha * powers[i] + (1 - self.alpha) * ema
+        print(f"检测完成，共处理 {len(data)} 个数据点")
+        return segments
 
-            if status == "BACKGROUND":
-                if ema > p_high:
-                    status = "WORKING"
-                    start_idx = i
-                    cooldown_counter = 0
-            elif status == "WORKING":
-                if ema < p_low:
-                    cooldown_counter += 1
-                    if cooldown_counter >= self.min_stop_time:
-                        status = "BACKGROUND"
-                        # 回溯真正结束的时间
-                        end_idx_in_month = max(0, i - self.min_stop_time)
-                        
-                        s_idx = orig_indices[start_idx]
-                        e_idx = orig_indices[end_idx_in_month]
-                        s_time = timestamps[start_idx]
-                        e_time = timestamps[end_idx_in_month]
-                        duration = max(0, e_time - s_time)
-                        
-                        if duration >= self.min_duration_seconds:
-                            periods.append((int(s_idx), int(e_idx), int(s_time), int(e_time), int(duration)))
-                else:
-                    cooldown_counter = 0
+    def _extract_all_segments_from_data(self, data: List[Tuple[int, float]], segments: List[Tuple[int, int, int, int, int]],
+                                      output_dir: str) -> List[str]:
+        """从数据列表中提取所有检测到的工作区间数据"""
+        output_files = []
 
-        # 闭合月末仍在运行的区间
-        if status == "WORKING":
-            end_idx_in_month = len(powers) - 1
-            s_idx = orig_indices[start_idx]
-            e_idx = orig_indices[end_idx_in_month]
-            s_time = timestamps[start_idx]
-            e_time = timestamps[end_idx_in_month]
-            duration = max(0, e_time - s_time)
-            if duration >= self.min_duration_seconds:
-                periods.append((int(s_idx), int(e_idx), int(s_time), int(e_time), int(duration)))
-
-        return periods
-
-    def _detect_working_segments_from_data(
-        self, data: List[Tuple[int, float]]
-    ) -> List[Tuple[int, int, int, int, int]]:
-        if not data:
-            return []
-
-        # Convert to DataFrame for processing
-        df = pd.DataFrame(data, columns=["timestamp", "power"])
-        df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
-        df["orig_idx"] = np.arange(len(df))
-        df.set_index("datetime", inplace=True)
-
-        all_periods = []
-        # 按月分组遍历
-        grouped = df.groupby(df.index.to_period("M"))
-
-        for month, df_month in grouped:
-            if len(df_month) < 2:
-                continue
-
-            # 1. 动态计算当月阈值
-            p_low, p_high = self._estimate_monthly_thresholds(df_month["power"])
-            print(f"月份 {month}: 动态阈值 p_low={p_low:.2f}, p_high={p_high:.2f}")
-
-            # 2. 用当月阈值跑状态机
-            month_periods = self._extract_periods_with_thresholds(df_month, p_low, p_high)
-            all_periods.extend(month_periods)
-
-        return all_periods
-
-    def _extract_all_segments_from_data(
-        self,
-        data: List[Tuple[int, float]],
-        segments: List[Tuple[int, int, int, int, int]],
-        output_dir: str,
-    ) -> List[str]:
-        output_files: List[str] = []
         for seg_idx, (start_idx, end_idx, start_time, end_time, duration) in enumerate(segments):
-            output_file = self._extract_single_segment_from_data(
-                data=data,
-                start_idx=start_idx,
-                end_idx=end_idx,
-                start_time=start_time,
-                end_time=end_time,
-                duration=duration,
-                output_dir=output_dir,
-                segment_id=seg_idx,
-            )
-            if output_file:
-                output_files.append(output_file)
+            try:
+                output_file = self._extract_single_segment_from_data(
+                    data, start_idx, end_idx, start_time, end_time, duration,
+                    output_dir, seg_idx
+                )
+                if output_file:
+                    output_files.append(output_file)
 
-            if (seg_idx + 1) % 10 == 0:
-                print(f"已提取 {seg_idx + 1}/{len(segments)} 个工作区间")
+                if (seg_idx + 1) % 10 == 0:
+                    print(f"已提取 {seg_idx + 1}/{len(segments)} 个工作区间")
+
+            except Exception as e:
+                print(f"提取区间 {seg_idx} 时出错: {e}")
+                continue
 
         return output_files
 
-    def _extract_single_segment_from_data(
-        self,
-        data: List[Tuple[int, float]],
-        start_idx: int,
-        end_idx: int,
-        start_time: int,
-        end_time: int,
-        duration: int,
-        output_dir: str,
-        segment_id: int,
-    ) -> Optional[str]:
-        timestamps = [t for t, _ in data]
-        context_start_time = start_time - self.context_seconds
-        context_end_time = end_time + self.context_seconds
-        context_start_idx = bisect.bisect_left(timestamps, context_start_time)
-        context_end_idx = bisect.bisect_right(timestamps, context_end_time) - 1
-        context_start_idx = max(0, context_start_idx)
-        context_end_idx = min(len(data) - 1, context_end_idx)
+    def _extract_single_segment_from_data(self, data: List[Tuple[int, float]], start_idx: int, end_idx: int,
+                                        start_time: int, end_time: int, duration: int,
+                                        output_dir: str, segment_id: int) -> Optional[str]:
+        """从数据列表中提取单个工作区间数据（包含上下文）"""
+        # 计算包含上下文的边界
+        context_start_idx = max(0, start_idx - self.context_seconds)
+        context_end_idx = min(len(data) - 1, end_idx + self.context_seconds)
+
+        # 提取数据
         segment_data = data[context_start_idx:context_end_idx + 1]
 
+        # 生成文件名
         start_dt = datetime.fromtimestamp(start_time)
         end_dt = datetime.fromtimestamp(end_time)
+
+        # 格式化时间字符串，用于文件名
         start_str = start_dt.strftime("%Y%m%d_%H%M%S")
         end_str = end_dt.strftime("%Y%m%d_%H%M%S")
 
+        # 创建文件名：{电器名称_起始时间_结束时间_持续时长}
         filename = f"{self.appliance_name}_{start_str}_{end_str}_{duration}s.csv"
         output_file = os.path.join(output_dir, filename)
 
+        # 如果文件已存在，跳过
         if os.path.exists(output_file):
             return output_file
 
         print(f"提取区间 {segment_id}: {start_str} - {end_str}, 持续 {duration}秒")
 
-        if not segment_data:
-            return None
+        # 转换为DataFrame并保存
+        if segment_data:
+            df = pd.DataFrame(segment_data, columns=['timestamp', 'power'])
 
-        df = pd.DataFrame(segment_data, columns=["timestamp", "power"])
-        df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
-        df.to_csv(output_file, index=False)
-        return output_file
+            # 添加可读时间列
+            df['datetime'] = pd.to_datetime(df['timestamp'], unit='s')
+
+            # 保存CSV文件
+            df.to_csv(output_file, index=False)
+
+            return output_file
+
+        return None
 
 
 class ExtractActiveDataStep(Step):
@@ -294,9 +303,6 @@ class ExtractActiveDataStep(Step):
         power_threshold: float = 1.0,
         min_duration_seconds: int = 30,
         context_seconds: int = 120,
-        alpha: float = 0.2,
-        min_stop_time: int = 5,
-        sample_rate: int = 10,
         set_input_root: bool = True,
     ):
         super().__init__(name)
@@ -305,9 +311,6 @@ class ExtractActiveDataStep(Step):
         self.power_threshold = power_threshold
         self.min_duration_seconds = min_duration_seconds
         self.context_seconds = context_seconds
-        self.alpha = alpha
-        self.min_stop_time = min_stop_time
-        self.sample_rate = sample_rate
         self.set_input_root = set_input_root
 
     def restore(self, context: dict) -> dict:
@@ -345,13 +348,10 @@ class ExtractActiveDataStep(Step):
         os.makedirs(segments_dir, exist_ok=True)
 
         segmenter = ApplianceDataSegmenter(
-            appliance_name=self.appliance_name or "appliance",
+            appliance_name=self.appliance_name or context.get("appliance_name", "appliance"),
             power_threshold=self.power_threshold,
             min_duration_seconds=self.min_duration_seconds,
             context_seconds=self.context_seconds,
-            alpha=self.alpha,
-            min_stop_time=self.min_stop_time,
-            sample_rate=self.sample_rate,
         )
         output_files = segmenter.process_dataset(self.input_file, segments_dir)
 
