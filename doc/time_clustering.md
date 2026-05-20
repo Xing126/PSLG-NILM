@@ -4,12 +4,13 @@
 
 ## 1. 功能概览
 
-`TimeClusteringStep` 支持 4 种模式：
+`TimeClusteringStep` 支持 5 种模式：
 
 - `dbscan`
 - `dbscan-scan`
 - `kmeans`
 - `kmeans-scan`
+- `hdbscan`
 
 输入仍以特征矩阵 `feature_path`（或 `context['features']`）为聚类主输入；`data_path` 主要用于可视化与样本导出。
 
@@ -17,7 +18,8 @@
 
 配置入口：`config/config.yaml -> steps.time_clustering`
 
-- `cluster_method`: `dbscan | dbscan-scan | kmeans | kmeans-scan`
+- `cluster_method`:
+  `dbscan | dbscan-scan | kmeans | kmeans-scan | hdbscan`
 - `method_specific`: 按方法分组参数
 - `visualization_specific`: 可视化二级配置
   - `enabled`
@@ -80,9 +82,17 @@ steps:
 
 说明：扫描维度是 `n_clusters`，记录每个 k 的 `SCI/DBI/CHI`。
 
+### 3.5 hdbscan
+
+- `min_cluster_size`
+- `min_samples`（可选，默认由库内部处理）
+- `cluster_selection_method`（`eom | leaf`）
+- `cluster_selection_epsilon`（默认 0.0）
+- `metric`（支持 `euclidean`；当 `metric=dtw/fastdtw` 时会使用预计算距离矩阵）
+
 ## 4. 输出规则（重点）
 
-### 4.1 普通模式（dbscan / kmeans）
+### 4.1 普通模式（dbscan / kmeans / hdbscan）
 
 会保存聚类结果与评估产物：
 

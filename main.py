@@ -97,6 +97,22 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         kmeans_random_state = method_config.get('random_state', cluster_config.get('kmeans_random_state', 42))
         kmeans_n_init = method_config.get('n_init', cluster_config.get('kmeans_n_init', 10))
         kmeans_max_iter = method_config.get('max_iter', cluster_config.get('kmeans_max_iter', 300))
+        hdbscan_min_cluster_size = method_config.get(
+            'min_cluster_size',
+            cluster_config.get('hdbscan_min_cluster_size', cluster_config.get('min_cluster_size', 20))
+        )
+        hdbscan_min_samples = method_config.get(
+            'min_samples',
+            cluster_config.get('hdbscan_min_samples', cluster_config.get('min_samples'))
+        )
+        hdbscan_cluster_selection_method = method_config.get(
+            'cluster_selection_method',
+            cluster_config.get('hdbscan_cluster_selection_method', 'eom')
+        )
+        hdbscan_cluster_selection_epsilon = method_config.get(
+            'cluster_selection_epsilon',
+            cluster_config.get('hdbscan_cluster_selection_epsilon', 0.0)
+        )
 
         enable_visualization = visualization_specific.get(
             'enabled',
@@ -141,6 +157,10 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
             kmeans_random_state=kmeans_random_state,
             kmeans_n_init=kmeans_n_init,
             kmeans_max_iter=kmeans_max_iter,
+            hdbscan_min_cluster_size=hdbscan_min_cluster_size,
+            hdbscan_min_samples=hdbscan_min_samples,
+            hdbscan_cluster_selection_method=hdbscan_cluster_selection_method,
+            hdbscan_cluster_selection_epsilon=hdbscan_cluster_selection_epsilon,
             metric=metric,
             normalization_method=cluster_config.get('normalization_method', 'zscore'),
             col_index=cluster_config.get('col_index', 2),

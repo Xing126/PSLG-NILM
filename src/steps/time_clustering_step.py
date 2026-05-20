@@ -1,9 +1,11 @@
 import os
 import sys
 import time
+import gc
 from datetime import datetime
 
 import numpy as np
+import hdbscan
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score, silhouette_score
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
@@ -45,6 +47,10 @@ class TimeClusteringStep(Step):
         kmeans_random_state=42,
         kmeans_n_init=10,
         kmeans_max_iter=300,
+        hdbscan_min_cluster_size=20,
+        hdbscan_min_samples=None,
+        hdbscan_cluster_selection_method='eom',
+        hdbscan_cluster_selection_epsilon=0.0,
         enable_visualization=True,
         visualize_noise=True,
         visualization_language='zh',
@@ -75,6 +81,10 @@ class TimeClusteringStep(Step):
         self.kmeans_random_state = kmeans_random_state
         self.kmeans_n_init = kmeans_n_init
         self.kmeans_max_iter = kmeans_max_iter
+        self.hdbscan_min_cluster_size = int(hdbscan_min_cluster_size)
+        self.hdbscan_min_samples = None if hdbscan_min_samples is None else int(hdbscan_min_samples)
+        self.hdbscan_cluster_selection_method = str(hdbscan_cluster_selection_method).lower()
+        self.hdbscan_cluster_selection_epsilon = float(hdbscan_cluster_selection_epsilon)
         self.enable_visualization = enable_visualization
         self.visualize_noise = bool(visualize_noise)
         self.visualization_language = str(visualization_language).lower()
@@ -386,6 +396,52 @@ class TimeClusteringStep(Step):
 
         return labels
 
+    def run_hdbscan(self, feature_matrix: np.ndarray = None, dist_matrix: np.ndarray = None) -> np.ndarray:
+        """Execute HDBSCAN clustering on feature vectors or precomputed distance matrix."""
+        if dist_matrix is not None:
+            print(
+                "[TimeClustering] Running HDBSCAN with metric=precomputed, "
+                f"min_cluster_size={self.hdbscan_min_cluster_size}, "
+                f"min_samples={self.hdbscan_min_samples}, "
+                f"cluster_selection_method={self.hdbscan_cluster_selection_method}, "
+                f"cluster_selection_epsilon={self.hdbscan_cluster_selection_epsilon}"
+            )
+            hdbscan_model = hdbscan.HDBSCAN(
+                min_cluster_size=self.hdbscan_min_cluster_size,
+                min_samples=self.hdbscan_min_samples,
+                metric='precomputed',
+                cluster_selection_method=self.hdbscan_cluster_selection_method,
+                cluster_selection_epsilon=self.hdbscan_cluster_selection_epsilon,
+            )
+            labels = hdbscan_model.fit_predict(dist_matrix)
+        else:
+            print(
+                f"[TimeClustering] Running HDBSCAN with metric={self.metric}, "
+                f"min_cluster_size={self.hdbscan_min_cluster_size}, "
+                f"min_samples={self.hdbscan_min_samples}, "
+                f"cluster_selection_method={self.hdbscan_cluster_selection_method}, "
+                f"cluster_selection_epsilon={self.hdbscan_cluster_selection_epsilon}"
+            )
+            hdbscan_model = hdbscan.HDBSCAN(
+                min_cluster_size=self.hdbscan_min_cluster_size,
+                min_samples=self.hdbscan_min_samples,
+                metric=self.metric,
+                cluster_selection_method=self.hdbscan_cluster_selection_method,
+                cluster_selection_epsilon=self.hdbscan_cluster_selection_epsilon,
+            )
+            labels = hdbscan_model.fit_predict(feature_matrix)
+
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = int(np.sum(labels == -1))
+        print(f"[TimeClustering] Clustering complete: {n_clusters} clusters, {n_noise} noise points")
+
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        for label, count in zip(unique_labels, counts):
+            label_name = "noise" if label == -1 else f"cluster_{label}"
+            print(f"  {label_name}: {count} samples")
+
+        return labels
+
     def run_kmeans_scan(self, feature_matrix: np.ndarray, save_dir: str) -> tuple:
         """Scan n_clusters in [min_cluster, max_cluster], save metrics JSON/plot, and return best labels."""
         min_k = int(self.min_cluster)
@@ -454,6 +510,7 @@ class TimeClusteringStep(Step):
             best_k,
             save_dir,
             data_path=self.data_path,
+            feature_path=self.feature_path,
             appliance_name=self.appliance_name,
         )
         return best_labels, best_k, scan_records, scan_payload
@@ -525,6 +582,7 @@ class TimeClusteringStep(Step):
             best_k,
             save_dir,
             data_path=self.data_path,
+            feature_path=self.feature_path,
             appliance_name=self.appliance_name,
         )
         return best_labels, best_k, scan_records, scan_payload
@@ -610,6 +668,7 @@ class TimeClusteringStep(Step):
             best_eps,
             save_dir,
             data_path=self.data_path,
+            feature_path=self.feature_path,
             appliance_name=self.appliance_name,
         )
         return best_labels, best_eps, scan_records, scan_payload
@@ -624,7 +683,15 @@ class TimeClusteringStep(Step):
 
         try:
             quant_dist_method = 'euclidean'
-            if self.cluster_method in ('dbscan', 'dbscan-scan', 'dbscan_scan', 'kmeans', 'kmeans-scan', 'kmeans_scan') and self.metric in ('dtw', 'fastdtw'):
+            if self.cluster_method in (
+                'dbscan',
+                'dbscan-scan',
+                'dbscan_scan',
+                'kmeans',
+                'kmeans-scan',
+                'kmeans_scan',
+                'hdbscan',
+            ) and self.metric in ('dtw', 'fastdtw'):
                 quant_dist_method = 'dtw'
 
             if self.cluster_method == 'dbscan':
@@ -658,6 +725,14 @@ class TimeClusteringStep(Step):
                     'n_init': int(self.kmeans_n_init),
                     'max_iter': int(self.kmeans_max_iter),
                 }
+            elif self.cluster_method == 'hdbscan':
+                clustering_hyperparams = {
+                    'min_cluster_size': int(self.hdbscan_min_cluster_size),
+                    'min_samples': None if self.hdbscan_min_samples is None else int(self.hdbscan_min_samples),
+                    'cluster_selection_method': str(self.hdbscan_cluster_selection_method),
+                    'cluster_selection_epsilon': float(self.hdbscan_cluster_selection_epsilon),
+                    'metric': str(self.metric),
+                }
             else:
                 clustering_hyperparams = {}
 
@@ -678,6 +753,7 @@ class TimeClusteringStep(Step):
                 cluster_stack_count=self.cluster_stack_count,
                 sampling_threshold=200,
                 data_path=self.data_path,
+                feature_path=self.feature_path,
                 appliance_name=self.appliance_name,
                 few_shot_enabled=self.few_shot_enabled,
                 few_shot_method=self.few_shot_method,
@@ -854,10 +930,14 @@ class TimeClusteringStep(Step):
             # and do not persist a selected-best clustering result.
             context['cluster_save_dir'] = save_dir
             context['dbscan_scan_best_eps'] = float(best_eps)
-            context['dbscan_scan_records'] = scan_records
-            if isinstance(scan_payload, dict):
-                context['dbscan_scan_metrics'] = scan_payload
+            
+            # Optimization: do not store full scan records in context if already saved
+            # context['dbscan_scan_records'] = scan_records
+            # if isinstance(scan_payload, dict):
+            #     context['dbscan_scan_metrics'] = scan_payload
+            
             print("[TimeClustering] DBSCAN scan mode completed (scan artifacts only)")
+            gc.collect()
             return context
         elif self.cluster_method == 'kmeans':
             if use_dtw_data:
@@ -867,6 +947,21 @@ class TimeClusteringStep(Step):
                 labels = self.run_kmeans(normalized_feature_matrix)
                 # Keep quantification path unified by building a precomputed distance matrix.
                 dist_matrix = cdist(normalized_feature_matrix, normalized_feature_matrix, metric='euclidean')
+        elif self.cluster_method == 'hdbscan':
+            if use_dtw_data:
+                dist_matrix = self.get_distance_matrix(
+                    ts_list,
+                    metric='dtw',
+                    cache_dir=save_dir
+                )
+                labels = self.run_hdbscan(dist_matrix=dist_matrix)
+            else:
+                labels = self.run_hdbscan(feature_matrix=normalized_feature_matrix)
+                dist_matrix = self.get_distance_matrix(
+                    normalized_feature_list,
+                    metric=self.metric,
+                    cache_dir=save_dir
+                )
         elif self.cluster_method in ('kmeans-scan', 'kmeans_scan'):
             if use_dtw_data:
                 dist_matrix = self.get_distance_matrix(ts_list, metric='dtw', cache_dir=save_dir)
@@ -883,15 +978,19 @@ class TimeClusteringStep(Step):
             # and do not persist a selected-best clustering result.
             context['cluster_save_dir'] = save_dir
             context['kmeans_scan_best_k'] = int(best_k)
-            context['kmeans_scan_records'] = scan_records
-            if isinstance(scan_payload, dict):
-                context['kmeans_scan_metrics'] = scan_payload
+            
+            # Optimization: do not store full scan records in context if already saved
+            # context['kmeans_scan_records'] = scan_records
+            # if isinstance(scan_payload, dict):
+            #     context['kmeans_scan_metrics'] = scan_payload
+            
             print("[TimeClustering] KMeans scan mode completed (scan artifacts only)")
+            gc.collect()
             return context
         else:
             raise ValueError(
                 f"Unsupported cluster_method: {self.cluster_method}. "
-                "Supported methods: dbscan, dbscan-scan, kmeans, kmeans-scan"
+                "Supported methods: dbscan, dbscan-scan, kmeans, kmeans-scan, hdbscan"
             )
 
         quant_metrics = self.evaluate_clustering(
@@ -914,4 +1013,5 @@ class TimeClusteringStep(Step):
         context['clustering_metrics'] = quant_metrics
 
         print(f"[TimeClustering] Clustering workflow complete")
+        gc.collect()
         return context

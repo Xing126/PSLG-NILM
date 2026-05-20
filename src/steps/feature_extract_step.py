@@ -8,6 +8,7 @@ from src.framework.step import Step
 from models.feature_extract.lstm_ae import lstm_ae
 from models.feature_extract.bilstm_ae import bilstm_ae
 from models.feature_extract.bilstm_ae_attantion import bilstm_ae_attention
+from models.feature_extract.detsec_model import detsec_ae
 
 
 class FeatureExtractStep(Step):
@@ -279,6 +280,11 @@ class FeatureExtractStep(Step):
                 print(f"[FeatureExtract] Using BiLSTM + Attention Autoencoder")
                 print(f"[FeatureExtract] Output shape: (n_samples, {self.latent_dim})")
                 extracted_features, training_history = bilstm_ae_attention(np_data, model_config)
+
+            elif self.model_name == "detsec":
+                print(f"[FeatureExtract] Using DETSEC Model")
+                model_config['lengths'] = lengths
+                extracted_features, training_history = detsec_ae(np_data, model_config)
 
             else:
                 print(f"[FeatureExtract] Unknown model: {self.model_name}")

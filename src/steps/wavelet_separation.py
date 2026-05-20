@@ -330,4 +330,5 @@ class WaveletSeparationStep(Step):
             print(f"Tensorization complete: {n_samples} samples, max_length={max_len}")
             print(f"Saved to {log_dir} and updated context['data']")
 
+        gc.collect()
         return context

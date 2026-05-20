@@ -1,5 +1,6 @@
 import json
 import os
+import gc
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -421,4 +422,5 @@ class DatasetSplitStep(Step):
             f"test_a events(few/non)={len(few_test)}/{len(non_test)}, "
             f"test_b events(few/non)={len(few_test)}/0"
         )
+        gc.collect()
         return context

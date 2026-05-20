@@ -3,17 +3,20 @@ import sys
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+from datetime import datetime
 
-# Add src to path to import ApplianceDataSegmenter
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add project root to sys.path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+sys.path.insert(0, project_root)
 
 from src.steps.extract_active_data_step import ApplianceDataSegmenter
 
 def main():
     input_file = "/home/scnu2023024258/data/code/PSLG-NILM/input/washing_machine.csv"
-    sequence_id = "20260518_washing"
+    sequence_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     step_name = "ExtractActiveData"
-    output_dir = f"/home/scnu2023024258/data/code/PSLG-NILM/log/{sequence_id}/{step_name}/figures"
+    output_dir = f"/home/scnu2023024258/data/code/PSLG-NILM/output/{sequence_id}/{step_name}/figures"
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Loading data from {input_file}...")
@@ -21,7 +24,7 @@ def main():
         appliance_name="washing_machine",
         power_threshold=1.0,
         min_duration_seconds=30,
-        context_seconds=120
+        context_seconds=40
     )
     
     # Read data using segmenter's method
@@ -33,7 +36,7 @@ def main():
     print(f"Detected {len(segments)} segments.")
 
     # Take first 20
-    top_20_segments = segments[:20]
+    top_20_segments = segments[:30]
     
     df = pd.DataFrame(data, columns=["timestamp", "power"])
 

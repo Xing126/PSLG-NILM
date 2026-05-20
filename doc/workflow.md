@@ -140,22 +140,21 @@ graph LR
     *   `context['cluster_save_dir']` (`str`)：聚类结果和图表的保存目录。
     *   `context['n_clusters']` (`int`) 和 `context['n_noise']` (`int`)：有效簇数量和噪声点数量。
     *   `context['evaluation_metrics']` / `context['clustering_metrics']` (`dict`)：聚类评价指标（如轮廓系数等）。
-    *   **网格搜索相关**（当进行超参扫描时）：`context['dbscan_scan_best_eps']`, `context['kmeans_scan_best_k']` 以及包含完整历史记录的 `scan_records` 和 `scan_metrics`。
+    *   **网格搜索相关**（当进行超参扫描时）：`context['dbscan_scan_best_eps']`, `context['kmeans_scan_best_k']`。*(注：为节省内存，scan 模式下的详细记录 scan_records 仅保存到磁盘，不再存入 context)*。
 
 ### 5. PrimitiveActivityMappingStep (原始活动映射)
 *   **读取 Context 变量**：
     *   `context['activity_sequence_dir']` 或 `context['input_root']`：活动序列 CSV 的来源目录。
     *   `context['primitive_sequence_dir']`：原始片段来源目录。
-*   **写入 Context 变量** (涵盖中间过程和最终张量)：
+*   **写入 Context 变量** (优化后仅保留路径与核心元数据，移除冗余 List 和 DataFrame)：
     *   **元数据路径**：
         *   `context['activity_sequence_source_dir']`, `context['primitive_sequence_source_dir']`：源路径。
-    *   **区间与匹配信息** (包含 DataFrame 和 JSON)：
-        *   `context['activity_sequence_ranges...']` (records/df/json)：活动区间。
-        *   `context['primitive_sequence_ranges...']` (records/df/json)：原始片段区间。
-        *   `context['primitive_activity_mapping...']` (records/df/json)：两者匹配关系的映射表。
+    *   **区间与匹配信息** (仅保留 JSON 路径)：
+        *   `context['activity_sequence_ranges_json']`：活动区间 JSON 路径。
+        *   `context['primitive_sequence_ranges_json']`：原始片段区间 JSON 路径。
+        *   `context['primitive_activity_mapping_json']`：两者匹配关系的映射表 JSON 路径。
     *   **最终数据集 (Few-shot 与 Non-few-shot)**：
-        *   `context['few_shot_activity_sequences...']` 和 `context['non_few_shot_activity_sequences...']`：对应集合的元数据。
-        *   `context['few_shot_activity_tensor']` / `context['non_few_shot_activity_tensor']`：张量数据。
+        *   `context['few_shot_activity_sequences_json']` 和 `context['non_few_shot_activity_sequences_json']`：对应集合的元数据 JSON 路径。
         *   `context['few_shot_activity_seq_lens']` / `context['non_few_shot_activity_seq_lens']`：长度数组。
         *   `context['few_shot_activity_tensor_npy']` / `context['non_few_shot_activity_tensor_npy']`：保存到磁盘的 `.npy` 文件绝对路径。
 

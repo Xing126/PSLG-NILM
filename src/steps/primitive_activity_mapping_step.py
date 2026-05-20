@@ -1,5 +1,6 @@
 import json
 import os
+import gc
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -463,31 +464,19 @@ class PrimitiveActivityMappingStep(Step):
 		np.save(non_few_shot_tensor_npy, non_few_shot_tensor)
 
 		context['activity_sequence_source_dir'] = activity_dir
-		context['activity_sequence_ranges'] = activity_records
-		context['activity_sequence_ranges_df'] = activity_df
 		context['activity_sequence_ranges_json'] = ranges_json_path
 
 		context['primitive_sequence_source_dir'] = primitive_dir
-		context['primitive_sequence_ranges'] = primitive_records
-		context['primitive_sequence_ranges_df'] = primitive_df
 		context['primitive_sequence_ranges_json'] = primitive_ranges_json
 
-		context['primitive_activity_mapping'] = match_records
-		context['primitive_activity_mapping_df'] = match_df
 		context['primitive_activity_mapping_json'] = mapping_json
 
-		context['few_shot_activity_sequences'] = few_shot_activity_records
-		context['few_shot_activity_sequences_df'] = few_shot_activity_df
 		context['few_shot_activity_sequences_json'] = few_shot_json
-		context['few_shot_activity_tensor'] = few_shot_tensor
 		context['few_shot_activity_seq_lens'] = few_shot_seq_lens
 		context['few_shot_activity_feature_columns'] = few_shot_feature_columns
 		context['few_shot_activity_tensor_npy'] = few_shot_tensor_npy
 
-		context['non_few_shot_activity_sequences'] = non_few_shot_activity_records
-		context['non_few_shot_activity_sequences_df'] = non_few_shot_activity_df
 		context['non_few_shot_activity_sequences_json'] = non_few_shot_json
-		context['non_few_shot_activity_tensor'] = non_few_shot_tensor
 		context['non_few_shot_activity_seq_lens'] = non_few_shot_seq_lens
 		context['non_few_shot_activity_feature_columns'] = non_few_shot_feature_columns
 		context['non_few_shot_activity_tensor_npy'] = non_few_shot_tensor_npy
@@ -498,4 +487,11 @@ class PrimitiveActivityMappingStep(Step):
 			f"non-few-shot activities={len(non_few_shot_activity_records)}/{non_few_shot_input_count}, "
 			f"few-shot tensor shape={tuple(few_shot_tensor.shape)}, non-few-shot tensor shape={tuple(non_few_shot_tensor.shape)}"
 		)
+		
+		# Optimization: Clean up large intermediate objects
+		del activity_records, activity_df, primitive_records, primitive_df
+		del match_records, match_df, few_shot_activity_records, non_few_shot_activity_records
+		del few_shot_tensor, non_few_shot_tensor, few_shot_activity_df, non_few_shot_activity_df
+		gc.collect()
+
 		return context

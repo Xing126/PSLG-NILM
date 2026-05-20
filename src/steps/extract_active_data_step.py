@@ -136,10 +136,10 @@ class ApplianceDataSegmenter:
             df = pd.read_csv(input_file)
             # 确保列名正确
             if 'timestamp' in df.columns and 'power' in df.columns:
-                data = [(int(row['timestamp']), float(row['power'])) for _, row in df.iterrows()]
+                data = list(zip(df['timestamp'].astype(int), df['power'].astype(float)))
             else:
                 # 假设第一列是 timestamp，第二列是 power
-                data = [(int(row[0]), float(row[1])) for _, row in df.iterrows()]
+                data = list(zip(df.iloc[:, 0].astype(int), df.iloc[:, 1].astype(float)))
             return data
         except Exception as e:
             raise ValueError(f"读取 CSV 文件失败: {e}")
@@ -158,7 +158,7 @@ class ApplianceDataSegmenter:
             data_array = np.load(input_file)
             # 确保数据格式正确
             if data_array.ndim == 2 and data_array.shape[1] >= 2:
-                data = [(int(row[0]), float(row[1])) for row in data_array]
+                data = list(zip(data_array[:, 0].astype(int), data_array[:, 1].astype(float)))
                 return data
             else:
                 raise ValueError(f"NPY 文件格式不正确，需要至少两列数据")
@@ -365,4 +365,5 @@ class ExtractActiveDataStep(Step):
         if self.set_input_root and output_files:
             context["input_root"] = segments_dir
 
+        gc.collect()
         return context

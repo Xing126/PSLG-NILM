@@ -327,7 +327,7 @@ def _get_hdbscan_validity_index():
 		return None
 
 
-def calculate_dbcv_score(dist_matrix: np.ndarray, cluster_labels: np.ndarray):
+def calculate_dbcv_score(dist_matrix: np.ndarray, cluster_labels: np.ndarray, d: Optional[int] = None):
 	"""Compute DBCV score using hdbscan.validity.validity_index on precomputed distances."""
 	labels = np.asarray(cluster_labels)
 	if labels.size == 0:
@@ -347,8 +347,16 @@ def calculate_dbcv_score(dist_matrix: np.ndarray, cluster_labels: np.ndarray):
 		print('[TimeClustering][WARN] hdbscan is not installed; DBCV is skipped. Install hdbscan to enable DBCV.')
 		return None
 
+	if d is None:
+		# For metric='precomputed', hdbscan.validity.validity_index requires d.
+		# Use a conservative fallback to keep the pipeline robust.
+		d = 2
+	if int(d) <= 0:
+		print(f'[TimeClustering][WARN] Invalid d={d} for DBCV; fallback to d=2.')
+		d = 2
+
 	try:
-		score = validity_index(dist_matrix, labels, metric='precomputed')
+		score = validity_index(dist_matrix, labels, metric='precomputed', d=int(d))
 		score = float(score)
 		if not np.isfinite(score):
 			return None
@@ -442,6 +450,7 @@ def save_kmeans_scan_artifacts(
 	best_k: int,
 	save_dir: str,
 	data_path: Optional[str] = None,
+	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
 ):
 	"""Persist KMeans-scan metrics as JSON and line chart."""
@@ -452,6 +461,7 @@ def save_kmeans_scan_artifacts(
 		'selection_rule': 'max_sci',
 		'data_source': {
 			'data_path': str(data_path) if data_path else None,
+			'feature_path': str(feature_path) if feature_path else None,
 			'appliance_name': str(appliance_name) if appliance_name else None,
 		},
 		'records': scan_records,
@@ -507,6 +517,7 @@ def save_dbscan_scan_artifacts(
 	best_eps: float,
 	save_dir: str,
 	data_path: Optional[str] = None,
+	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
 ):
 	"""Persist DBSCAN-scan metrics as JSON and line charts."""
@@ -517,6 +528,7 @@ def save_dbscan_scan_artifacts(
 		'selection_rule': 'max_sci',
 		'data_source': {
 			'data_path': str(data_path) if data_path else None,
+			'feature_path': str(feature_path) if feature_path else None,
 			'appliance_name': str(appliance_name) if appliance_name else None,
 		},
 		'records': scan_records,
@@ -752,6 +764,7 @@ def cluster_result_quantification(
 	cluster_stack_count: int = 50,
 	sampling_threshold: int = 200,
 	data_path: Optional[str] = None,
+	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
 	few_shot_enabled: bool = False,
 	few_shot_method: str = 'avg_percent',
@@ -782,7 +795,14 @@ def cluster_result_quantification(
 	)
 	method_name = str(cluster_method).lower()
 	if method_name in ('hdbscan', 'hdbscan-scan', 'hdbscan_scan'):
-		dbcv_score = calculate_dbcv_score(dist_matrix=dist_matrix, cluster_labels=cluster_labels)
+		feature_dim = None
+		if isinstance(feature_matrix, np.ndarray) and feature_matrix.ndim >= 2 and feature_matrix.shape[1] > 0:
+			feature_dim = int(feature_matrix.shape[1])
+		dbcv_score = calculate_dbcv_score(
+			dist_matrix=dist_matrix,
+			cluster_labels=cluster_labels,
+			d=feature_dim,
+		)
 	else:
 		dbcv_score = None
 
@@ -792,6 +812,7 @@ def cluster_result_quantification(
 		'distance_method_for_quantification': str(dist_method),
 		'data_source': {
 			'data_path': str(data_path) if data_path else None,
+			'feature_path': str(feature_path) if feature_path else None,
 			'appliance_name': str(appliance_name) if appliance_name else None,
 		},
 		'cluster_distribution': {
