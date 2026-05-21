@@ -1,9 +1,9 @@
 import numpy as np
 from numba import njit
 
-from claspy.clasp import ClaSP
-from claspy.nearest_neighbour import KSubsequenceNeighbours
-from claspy.utils import check_input_time_series
+from ..clasp import ClaSP
+from ..nearest_neighbour import KSubsequenceNeighbours
+from ..utils import check_input_time_series
 
 
 @njit(fastmath=True, cache=True)

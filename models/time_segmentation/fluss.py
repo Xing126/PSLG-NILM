@@ -139,7 +139,7 @@ def find_boundaries(window_size, ac, cac, n_regimes, excl_zone):
 #     fluss_visualize(ts, mp, mpi, ac, cac, segments, window_size)
 #     return ts, segments
 
-def fluss(ts, window_size, n_regimes=3, excl_factor=1):
+def fluss(ts, window_size, n_regimes=3, excl_factor=1, visualize=False):
     # 2. 计算 Matrix Profile
     # stumpy.stump 返回一个矩阵，第一列是距离(MP)，第二列是索引(MPI)
     mp_res = stumpy.stump(ts, window_size)
@@ -154,7 +154,8 @@ def fluss(ts, window_size, n_regimes=3, excl_factor=1):
     # excl_factor: 排除区域因子 (默认 5)
     cac, regime_locations = stumpy.fluss(mpi, L=window_size, n_regimes=n_regimes, excl_factor=excl_factor)
     print(f"检测到的分割点位置: {regime_locations}")
-    fluss_visualize(ts, mp, mpi, None, cac, regime_locations, window_size)
+    if visualize:
+        fluss_visualize(ts, mp, mpi, None, cac, regime_locations, window_size)
     return ts, regime_locations
 
 

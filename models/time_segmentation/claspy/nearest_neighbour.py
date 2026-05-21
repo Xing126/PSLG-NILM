@@ -5,8 +5,8 @@ import numpy.fft as fft
 from numba import njit, prange, objmode, get_num_threads, set_num_threads
 from numba.typed.typedlist import List
 
-from claspy.distance import map_distances
-from claspy.utils import check_input_time_series, numba_cache_safe
+from .distance import map_distances
+from .utils import check_input_time_series, numba_cache_safe
 
 
 @njit(fastmath=True, cache=True)

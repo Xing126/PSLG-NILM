@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from claspy.data_loader import load_tssb_dataset
-from claspy.window_size import suss, dominant_fourier_frequency, highest_autocorrelation
+from ..data_loader import load_tssb_dataset
+from ..window_size import suss, dominant_fourier_frequency, highest_autocorrelation
 
 
 class WindowSizeTest(unittest.TestCase):

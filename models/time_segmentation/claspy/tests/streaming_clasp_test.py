@@ -3,8 +3,8 @@ from itertools import product
 
 import numpy as np
 
-from claspy.data_loader import load_tssb_dataset
-from claspy.streaming.clasp import ClaSS
+from ..data_loader import load_tssb_dataset
+from ..streaming.clasp import ClaSS
 
 
 class ClaSSTest(unittest.TestCase):

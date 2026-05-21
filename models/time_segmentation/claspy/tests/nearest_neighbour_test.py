@@ -3,8 +3,8 @@ from itertools import product
 
 import numpy as np
 
-from claspy.data_loader import load_tssb_dataset
-from claspy.nearest_neighbour import KSubsequenceNeighbours
+from ..data_loader import load_tssb_dataset
+from ..nearest_neighbour import KSubsequenceNeighbours
 
 
 class KSubsequenceNeighboursTest(unittest.TestCase):

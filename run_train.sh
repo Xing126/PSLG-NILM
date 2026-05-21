@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -J PSLG-NILM
-#SBATCH -p RTX3090
+#SBATCH -p A6000
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
 #SBATCH --mem=32G

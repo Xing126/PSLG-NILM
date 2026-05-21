@@ -16,11 +16,11 @@ graph LR
         Step1 -->|是| EAD[ExtractActiveDataStep<br/>提取活动数据]
         Step1 -->|否| Step2
         
-        EAD -- "CSV文件列表" --> Step2{是否启用 WaveletSeparation?}
-        Step2 -->|是| WS[WaveletSeparationStep<br/>小波分离]
+        EAD -- "CSV文件列表" --> Step2{是否启用 TimeSegmentation?}
+        Step2 -->|是| TS[TimeSegmentationStep<br/>时间序列分割]
         Step2 -->|否| Step3
         
-        WS -- "X: (N, L, 4)<br/>lengths: (N, 1)" --> Step3{是否启用 FeatureExtract?}
+        TS -- "X: (N, L, 4)<br/>lengths: (N, 1)" --> Step3{是否启用 FeatureExtract?}
         Step3 -->|是| FE[FeatureExtractStep<br/>特征提取]
         Step3 -->|否| Step4
         
@@ -47,7 +47,7 @@ graph LR
     style InitWF fill:#bbf,stroke:#333,stroke-width:2px
     style RunWF fill:#bfb,stroke:#333,stroke-width:2px
     style EAD fill:#fff,stroke:#333
-    style WS fill:#fff,stroke:#333
+    style TS fill:#fff,stroke:#333
     style FE fill:#fff,stroke:#333
     style TC fill:#fff,stroke:#333
     style PAM fill:#fff,stroke:#333
@@ -68,7 +68,7 @@ graph LR
     
         %% 步骤节点
         EAD[1. ExtractActiveDataStep]:::stepNode
-        WS[2. WaveletSeparationStep]:::stepNode
+        TS[2. TimeSegmentationStep]:::stepNode
         FE[3. FeatureExtractStep]:::stepNode
         TC[4. TimeClusteringStep]:::stepNode
         PAM[5. PrimitiveActivityMappingStep]:::stepNode
@@ -86,11 +86,11 @@ graph LR
     
         %% 关系连线
         EAD -->|写入| CTX_IR
-        CTX_IR -->|读取| WS
+        CTX_IR -->|读取| TS
         CTX_IR -.->|"兜底读取<br/>(活动序列)"| PAM
         
-        WS -->|写入| CTX_X
-        WS -->|写入| CTX_LEN
+        TS -->|写入| CTX_X
+        TS -->|写入| CTX_LEN
         
         CTX_X -->|读取| FE
         FE -->|写入| CTX_FEAT
@@ -115,7 +115,7 @@ graph LR
     *   `context['data']['extract_active_data']['segment_files']`：生成的 CSV 路径列表。
     *   `context['input_root']`：设置为 `segments_dir`，作为下游步骤的默认输入目录（若 `set_input_root=True`）。
 
-### 2. WaveletSeparationStep (小波分离)
+### 2. TimeSegmentationStep (时间序列分割)
 *   **读取 Context 变量**：
     *   `context['input_root']`：输入目录（优先使用），通常由上一环节提供。
     *   `context['log_root']`：用于兜底查找输入或设置当前日志目录。

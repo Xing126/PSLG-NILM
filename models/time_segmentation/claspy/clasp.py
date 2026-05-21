@@ -4,11 +4,11 @@ import numpy as np
 from numba import njit, prange, get_num_threads, set_num_threads
 from sklearn.exceptions import NotFittedError
 
-from claspy.nearest_neighbour import KSubsequenceNeighbours
-from claspy.nearest_neighbour import cross_val_labels
-from claspy.scoring import map_scores
-from claspy.utils import check_input_time_series, check_excl_radius, numba_cache_safe
-from claspy.validation import map_validation_tests
+from .nearest_neighbour import KSubsequenceNeighbours
+from .nearest_neighbour import cross_val_labels
+from .scoring import map_scores
+from .utils import check_input_time_series, check_excl_radius, numba_cache_safe
+from .validation import map_validation_tests
 
 
 @njit(fastmath=True, cache=False)

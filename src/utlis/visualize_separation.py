@@ -75,7 +75,7 @@ def synthesize_changepoints(low_cp, high_cp):
     return sorted(synthesized_cp), ref_name
 
 def run_wavelet_analysis(signal, wavelet, is_shape_dtw=False):
-    """Performs wavelet separation and segmentation logic from WaveletSeparationStep."""
+    """Performs wavelet separation and segmentation logic from TimeSegmentationStep."""
     level = 2
     coeffs = pywt.wavedec(signal, wavelet, level=level)
     cA2, cD2, cD1 = coeffs

@@ -2,10 +2,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.exceptions import NotFittedError
 
-from claspy.streaming.clasp import ClaSS
-from claspy.streaming.nearest_neighbour import StreamingKSubsequenceNeighbours
-from claspy.utils import roll_array
-from claspy.window_size import map_window_size_methods
+from .clasp import ClaSS
+from .nearest_neighbour import StreamingKSubsequenceNeighbours
+from ..utils import roll_array
+from ..window_size import map_window_size_methods
 
 
 class StreamingClaSPSegmentation:

@@ -52,7 +52,7 @@ pip install -r requirements.txt
 1. 将一个或多个电器的 CSV 文件放到 `input/` 目录下（每个文件至少包含 `timestamp,power` 两列）。
 2. 在 `config/config.yaml` 中关闭 `steps.extract_active_data.enabled: false`。
 
-此时 `WaveletSeparationStep` 会直接从 `input/` 读取数据。
+此时 `TimeSegmentationStep` 会直接从 `input/` 读取数据。
 
 #### 方式 B：用 ExtractActiveDataStep 从外部大 CSV 切割工作区间
 
@@ -62,7 +62,7 @@ pip install -r requirements.txt
 2. 设置 `steps.extract_active_data.input_file` 为目标电器的 `.csv` 文件路径（必须是文件路径，不是目录）。
 3. 保持 `steps.extract_active_data.set_input_root: true`（默认值）。
 
-这样会先在 `log/.../ExtractActiveData/segments/` 生成切割后的多个 CSV，再由后续步骤（如 `WaveletSeparationStep`）直接加载这些切割结果。
+这样会先在 `log/.../ExtractActiveData/segments/` 生成切割后的多个 CSV，再由后续步骤（如 `TimeSegmentationStep`）直接加载这些切割结果。
 
 ### 3. 配置工作流
 

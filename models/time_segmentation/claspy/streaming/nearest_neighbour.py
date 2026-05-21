@@ -1,9 +1,9 @@
 import numpy as np
 from numba import njit
 
-from claspy.distance import map_distances
-from claspy.nearest_neighbour import _sliding_dot, _argkmin, KSubsequenceNeighbours
-from claspy.utils import roll_array
+from ..distance import map_distances
+from ..nearest_neighbour import _sliding_dot, _argkmin, KSubsequenceNeighbours
+from ..utils import roll_array
 
 
 @njit(fastmath=True, cache=True)

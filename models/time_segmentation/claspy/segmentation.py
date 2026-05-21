@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 from sklearn.exceptions import NotFittedError
 
-from claspy.clasp import ClaSPEnsemble
-from claspy.utils import check_input_time_series, check_excl_radius
-from claspy.window_size import map_window_size_methods
+from .clasp import ClaSPEnsemble
+from .utils import check_input_time_series, check_excl_radius
+from .window_size import map_window_size_methods
 
 
 class BinaryClaSPSegmentation:

@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import distributions
 
-from claspy.nearest_neighbour import cross_val_labels
+from .nearest_neighbour import cross_val_labels
 
 
 def _rank_binary_data(data):

@@ -5,9 +5,9 @@ from itertools import product
 
 import numpy as np
 
-from claspy.data_loader import load_tssb_dataset, load_has_dataset
-from claspy.segmentation import BinaryClaSPSegmentation
-from claspy.tests.evaluation import covering
+from ..data_loader import load_tssb_dataset, load_has_dataset
+from ..segmentation import BinaryClaSPSegmentation
+from .evaluation import covering
 
 ABS_PATH = os.path.dirname(os.path.abspath(__file__))
 
