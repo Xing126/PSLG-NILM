@@ -38,9 +38,9 @@ steps:
   time_clustering:
     enabled: true
     data_path: "input/dishwasher/data_fusion.npy"
-    feature_path: "input/dishwasher/bilstm_ae_attention_v2_features_cleaned_power_64_dim.npy"
+    feature_path: "input/dishwasher/autoencoder_features_cleaned_power_64_dim.npy"
     seq_len_path: "input/dishwasher/seq_length_fusion.npy"
-    cluster_method: "kmeans"  # dbscan / dbscan-scan / kmeans / kmeans-scan / hdbscan
+    cluster_method: "kmeans-scan"  # dbscan / dbscan-scan / kmeans / kmeans-scan / hdbscan
     method_specific:
       dbscan:
         eps: 1.25

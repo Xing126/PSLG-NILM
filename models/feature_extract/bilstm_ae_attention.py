@@ -82,7 +82,7 @@ class DETSECAttention(Layer):
             output: 注意力加权后的特征，形状为 (batch_size, nunits)
         """
         # inputs形状: (batch_size, timesteps, nunits)
-        # batch_size = tf.shape(inputs)[0]
+        batch_size = tf.shape(inputs)[0]
         
         # 第一步：计算 v = tanh(inputs @ W_omega + b_omega)
         # inputs @ W_omega: (batch, time, nunits) @ (nunits, attention_size) = (batch, time, attention_size)
@@ -151,23 +151,53 @@ def bilstm_ae_attention(data: np.ndarray, config: dict):
     """
     BiLSTM + DETSEC风格全局注意力自编码器特征提取函数
     
-    修改版：先对BiLSTM输出序列进行门控（Gating），再进行注意力（Attention）聚合。
+    该函数使用双向 LSTM 结合DETSEC风格全局注意力机制的自编码器从时序数据中提取全局特征。
+    参考DETSEC.py的实现，采用双向分别计算注意力+门控融合的策略。
     
     模型结构：
     - 编码器：
       - BiLSTM(32+32)：提取双向时序特征
       - Split：分离前向和后向输出
-      - GatingLayer：分别对前向和后向序列进行门控 (Sequence Level Gating)
-      - DETSECAttention：分别对门控后的序列计算注意力，聚合为向量
+      - DETSECAttention：分别对前向和后向计算注意力
+      - GatingLayer：使用门控机制融合双向注意力结果
       - Dense(latent_dim)：降维到目标维度
     - 解码器：RepeatVector + BiLSTM(32+32) + TimeDistributed(Dense)，重构原始时序
     
     Args:
         data (np.ndarray): 输入数据，形状为 (n_samples, timesteps, n_features)
-        config (dict): 模型配置字典
+                          - n_samples: 样本数量
+                          - timesteps: 时间步长度（填充后的统一长度）
+                          - n_features: 特征数量（单特征时为1）
+        config (dict): 模型配置字典，包含以下键：
+                      - latent_dim (int): 全局特征维度，默认64
+                      - epochs (int): 训练轮数，默认50
+                      - batch_size (int): 批量大小，默认32
+                      - learning_rate (float): 学习率，默认0.001
+                      - patience (int): 早停耐心值，默认5
+                      - attention_size (int): 注意力隐藏层维度，默认32
     
     Returns:
         tuple: (features, training_history)
+            features (np.ndarray): 提取的全局注意力特征，形状为 (n_samples, latent_dim)
+            training_history (dict): 训练过程的历史信息，包含：
+                - loss: 训练损失
+                - val_loss: 验证损失
+                - epochs_trained: 实际训练轮数
+    
+    Example:
+        >>> import numpy as np
+        >>> data = np.random.rand(100, 50, 1)  # 100个样本，50个时间步，1个特征
+        >>> config = {"latent_dim": 64, "epochs": 50, "batch_size": 32, 
+        ...           "learning_rate": 0.001, "patience": 5, "attention_size": 32}
+        >>> features, history = bilstm_ae_attention(data, config)
+        >>> print(features.shape)  # (100, 64)
+    
+    Note:
+        与原版DETSEC的区别：
+        - 使用Keras Functional API而非TensorFlow 1.x的低级API
+        - 保留了BiLSTM+AE的主干结构
+        - 采用DETSEC的注意力计算方式（W_omega, b_omega, u_omega）
+        - 添加了门控融合机制
     """
     # ===================== 1. 解析配置参数 =====================
     latent_dim = config.get("latent_dim", 64)  # 全局特征维度
@@ -176,31 +206,40 @@ def bilstm_ae_attention(data: np.ndarray, config: dict):
     learning_rate = config.get("learning_rate", 0.001)  # 学习率
     patience = config.get("patience", 5)       # 早停耐心值
     attention_size = config.get("attention_size", 32)  # 注意力隐藏层维度
-
+    
     # ===================== 2. 提取数据维度信息 =====================
     timesteps = data.shape[1]  # 时间步长度
     n_features = data.shape[2]  # 特征数量
     
     # 赋值为模型输入
     X = data
-
+    
     # ===================== 3. 数据归一化 =====================
+    # 深度学习对数据量级敏感，原始数据可能高达数千，不归一化极易导致梯度爆炸（NaN）
+    # 使用 Min-Max 归一化将数据映射到 [0, 1] 区间
     X_min = X.min()
     X_max = X.max()
-    X = (X - X_min) / (X_max - X_min + 1e-7)
+    X = (X - X_min) / (X_max - X_min + 1e-7)  # 加上小常数防止除零
     
+    # 计算归一化后的 Mask 值（原始填充值 0.0 对应的新值）
+    # Masking 层会忽略这个值，避免填充值对模型训练的影响
     scaled_mask_value = (0.0 - X_min) / (X_max - X_min + 1e-7)
     print(f"归一化完成 | 范围: {X.min():.2f} ~ {X.max():.2f} | Mask值: {scaled_mask_value:.4f}")
-
+    
     # ===================== 4. 构建 BiLSTM + DETSEC注意力自编码器模型 =====================
-    # 输入层
+    # 输入层：适配单特征的时序形状 (timesteps, n_features)
     input_layer = Input(shape=(timesteps, n_features), name="input_layer")
-
-    # Masking 层
+    
+    # Masking 层：忽略填充值，适配不等长数据
+    # 对于填充为 0.0 的位置，Masking 层会将其在计算中忽略
     masking_layer = Masking(mask_value=scaled_mask_value, name="masking_layer")(input_layer)
-
+    
     # ===================== 编码器部分 =====================
-    # BiLSTM 编码器
+    # BiLSTM 编码器：双向 LSTM，提取时序数据的前向+后向依赖
+    # - 每个方向 32 个单元，总共 64 个单元
+    # - return_sequences=True: 返回每个时间步的输出（保持 3 维结构）
+    # - 输出形状: (batch_size, timesteps, 64)
+    # 注意：Bidirectional LSTM的输出是前向和后向的拼接 [forward_32, backward_32]
     encoder_bilstm = Bidirectional(
         LSTM(32, activation='tanh', return_sequences=True),
         name="encoder_bilstm"
@@ -208,99 +247,143 @@ def bilstm_ae_attention(data: np.ndarray, config: dict):
     # encoder_bilstm形状: (batch_size, timesteps, 64)
     
     # 分离前向和后向输出
+    # 前向LSTM输出：前32维
     forward_output = Lambda(lambda x: x[:, :, :32], name="forward_split")(encoder_bilstm)
+    # 后向LSTM输出：后32维
     backward_output = Lambda(lambda x: x[:, :, 32:], name="backward_split")(encoder_bilstm)
     
-    # === 修改部分开始：先 Gating (Sequence Level) 再 Attention ===
-    
-    # 1. 对序列应用门控机制
-    # 生成门控系数 (Batch, Time, 32)
-    gate_fw_seq = GatingLayer(name="gate_forward_seq")(forward_output)
-    gate_bw_seq = GatingLayer(name="gate_backward_seq")(backward_output)
-    
-    # 应用门控：Sequence * Gate
-    gated_fw_seq = Multiply(name="gated_forward_seq")([forward_output, gate_fw_seq])
-    gated_bw_seq = Multiply(name="gated_backward_seq")([backward_output, gate_bw_seq])
-    
-    # 2. 对门控后的序列计算 Attention，聚合为向量
-    # 前向注意力 -> (Batch, 32)
+    # 分别对前向和后向计算DETSEC风格的注意力
+    # 前向注意力
     attention_fw = DETSECAttention(
         attention_size=attention_size,
         kernel_initializer=initializers.RandomNormal(stddev=0.1),
         name="attention_forward"
-    )(gated_fw_seq)
+    )(forward_output)
+    # attention_fw形状: (batch_size, 32)
     
-    # 后向注意力 -> (Batch, 32)
+    # 后向注意力
     attention_bw = DETSECAttention(
         attention_size=attention_size,
         kernel_initializer=initializers.RandomNormal(stddev=0.1),
         name="attention_backward"
-    )(gated_bw_seq)
+    )(backward_output)
+    # attention_bw形状: (batch_size, 32)
     
-    # 3. 拼接融合后的特征
-    encoder_concat = Concatenate(name="encoder_concat")([attention_fw, attention_bw])
+    # 使用门控机制融合前向和后向注意力结果
+    # 参考DETSEC.py：encoder = gate(encoder_fw) * encoder_fw + gate(encoder_bw) * encoder_bw
+    gate_fw = GatingLayer(name="gate_forward")(attention_fw)
+    gate_bw = GatingLayer(name="gate_backward")(attention_bw)
+    
+    # 门控融合
+    gated_fw = Lambda(lambda x: x[0] * x[1], name="gated_forward")([gate_fw, attention_fw])
+    gated_bw = Lambda(lambda x: x[0] * x[1], name="gated_backward")([gate_bw, attention_bw])
+    
+    # 拼接融合后的特征
+    encoder_concat = Concatenate(name="encoder_concat")([gated_fw, gated_bw])
     # encoder_concat形状: (batch_size, 64)
     
-    # === 修改部分结束 ===
-    
-    # 编码器特征降维
+    # 编码器特征降维：将 64 维特征降维到 latent_dim
     encoder_features = Dense(latent_dim, activation='relu', name="encoder_global_dense")(encoder_concat)
-
+    # encoder_features形状: (batch_size, latent_dim)
+    
     # ===================== 解码器部分 =====================
+    # 将全局特征复制到每个时间步，作为解码器的输入
+    # - RepeatVector: 将 (batch_size, latent_dim) 转换为 (batch_size, timesteps, latent_dim)
     decoder_input = RepeatVector(timesteps, name="repeat_vector")(encoder_features)
-
+    
+    # BiLSTM 解码器：从全局特征重构时序数据
+    # - 使用双向 LSTM（与编码器对称）
+    # - return_sequences=True: 返回每个时间步的输出
+    # - 输出形状: (batch_size, timesteps, 64)
     decoder_bilstm = Bidirectional(
         LSTM(32, activation='tanh', return_sequences=True),
         name="decoder_bilstm"
     )(decoder_input)
-
+    
+    # 输出层：TimeDistributed + Dense
+    # - 对每个时间步独立应用全连接层
+    # - 将解码器的输出映射到原始特征空间
+    # - 输出形状: (batch_size, timesteps, n_features)
     output_layer = TimeDistributed(
         Dense(n_features, activation='linear'),
         name="output_layer"
     )(decoder_bilstm)
-
-    # ===================== 5. 构建完整模型 =====================
-    lstm_autoencoder = Model(inputs=input_layer, outputs=output_layer, name="bilstm_detsec_attention_ae_v2")
     
-    lstm_encoder_model = Model(inputs=input_layer, outputs=encoder_features, name="detsec_attention_encoder_v2")
+    # ===================== 5. 构建完整模型 =====================
+    # 自编码器模型：用于训练，输入和输出都是原始数据
+    # - 输入形状: (batch_size, timesteps, n_features)
+    # - 输出形状: (batch_size, timesteps, n_features)
+    lstm_autoencoder = Model(inputs=input_layer, outputs=output_layer, name="bilstm_detsec_attention_ae")
+    
+    # 编码器模型：用于特征提取，只保留编码器部分
+    # - 输出形状: (batch_size, latent_dim)
+    # - 这是全局特征，时间维度已被聚合
+    lstm_encoder_model = Model(inputs=input_layer, outputs=encoder_features, name="detsec_attention_encoder")
+    
+    # 注意力可视化模型：用于获取注意力权重
+    # 创建辅助模型来获取注意力权重
+    attention_model_fw = Model(
+        inputs=input_layer,
+        outputs=attention_fw
+    )
+    attention_model_bw = Model(
+        inputs=input_layer,
+        outputs=attention_bw
+    )
     
     # ===================== 6. 编译模型 =====================
+    # 使用 Adam 优化器，添加梯度裁剪防止梯度爆炸
+    # clipnorm=1.0: 将梯度范数裁剪到 1.0 以内
     lstm_autoencoder.compile(
         optimizer=Adam(learning_rate=learning_rate, clipnorm=1.0),
         loss='mse'
     )
-
+    
     # ===================== 7. 配置早停回调 =====================
+    # 当验证集损失在 patience 个 epoch 内没有改善时，停止训练
     earliest_stop = EarlyStopping(
-        monitor='val_loss',      
-        patience=patience,       
-        mode='min',              
-        restore_best_weights=True,
-        verbose=1                
+        monitor='val_loss',      # 监控验证集损失
+        patience=patience,       # 耐心值：多少个 epoch 没有改善就停止
+        mode='min',              # 损失越小越好
+        restore_best_weights=True,  # 恢复到最佳权重的模型
+        verbose=1                # 打印停止信息
     )
-
+    
     # ===================== 8. 训练模型 =====================
+    # 无监督学习：输入和标签都是原始数据
+    # Masking 层会忽略填充值的重构误差
+    # 根据样本数量自动调整验证集比例
+    n_samples = X.shape[0]
+    if n_samples < 5:
+        print(f"[FeatureExtract] Warning: Too few samples ({n_samples}) for validation split. Disabling validation.")
+        current_val_split = 0.0
+        current_callbacks = [] # 样本太少时禁用早停，因为没有验证集
+    else:
+        current_val_split = 0.2
+        current_callbacks = [earliest_stop]
+        
     history = lstm_autoencoder.fit(
-        X, X,
+        X, X,                    # 输入 = 标签（自编码器的特点）
         epochs=epochs,
         batch_size=batch_size,
-        shuffle=True,
-        validation_split=0.2,
-        callbacks=[earliest_stop]
+        shuffle=True,             # 每个 epoch 打乱数据顺序
+        validation_split=current_val_split,
+        callbacks=current_callbacks
     )
-
-    # ===================== 9. 提取特征 =====================
-    X_global_features = lstm_encoder_model.predict(X)
-
-    # ===================== 10. 输出结果 =====================
-    print(f"\n原始数据形状: {X.shape}")
-    print(f"DETSEC注意力特征形状: {X_global_features.shape}")
     
+    # ===================== 9. 提取特征 =====================
+    # 使用训练好的编码器提取全局特征
+    # 输出形状: (n_samples, latent_dim)
+    # 这是全局特征，时间维度已被聚合
+    X_global_features = lstm_encoder_model.predict(X)
+    
+    # ===================== 10. 输出结果 =====================
+    # 构建训练历史信息字典
     training_history = {
         'loss': history.history['loss'],
-        'val_loss': history.history['val_loss'],
+        'val_loss': history.history.get('val_loss', history.history['loss']), # 如果没有 val_loss，用 loss 代替
         'epochs_trained': len(history.history['loss']),
-        'model_name': 'BiLSTM+Gated_Sequence+Attention'
+        'model_name': 'BiLSTM_Attention'
     }
     
     return X_global_features, training_history
@@ -308,7 +391,7 @@ def bilstm_ae_attention(data: np.ndarray, config: dict):
 
 if __name__ == "__main__":
     # 测试代码
-    print("测试修改版 BiLSTM+Gated+Attention 模型...")
+    print("测试DETSEC风格的BiLSTM+Attention模型...")
     
     # 创建测试数据
     test_data = np.random.rand(20, 30, 1).astype(np.float32)

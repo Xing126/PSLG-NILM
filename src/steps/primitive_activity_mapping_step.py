@@ -492,6 +492,12 @@ class PrimitiveActivityMappingStep(Step):
 		del activity_records, activity_df, primitive_records, primitive_df
 		del match_records, match_df, few_shot_activity_records, non_few_shot_activity_records
 		del few_shot_tensor, non_few_shot_tensor, few_shot_activity_df, non_few_shot_activity_df
+		
+		# Sliding context release: Step 5 (PrimitiveActivityMapping) releases Step 3 (FeatureExtract) data
+		if 'features' in context:
+			print("[PrimitiveActivityMapping] Releasing Step 3 (FeatureExtract) context data: features")
+			del context['features']
+
 		gc.collect()
 
 		return context

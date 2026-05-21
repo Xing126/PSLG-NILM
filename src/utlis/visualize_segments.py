@@ -15,8 +15,10 @@ from src.steps.extract_active_data_step import ApplianceDataSegmenter
 def main():
     input_file = "/home/scnu2023024258/data/code/PSLG-NILM/input/washing_machine.csv"
     sequence_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    step_name = "ExtractActiveData"
-    output_dir = f"/home/scnu2023024258/data/code/PSLG-NILM/output/{sequence_id}/{step_name}/figures"
+    run_id = f"visualize_segments_{sequence_id}"
+    
+    # According to GUIDELINES.md: output/{run_id}/
+    output_dir = os.path.join(project_root, "output", run_id)
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Loading data from {input_file}...")

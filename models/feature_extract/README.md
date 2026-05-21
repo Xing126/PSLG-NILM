@@ -8,12 +8,7 @@
 |---------|------|------|----------|
 | LSTM 自编码器 | `lstm_ae.py` | 单向 LSTM，结构简单，计算效率高 | 简单时序模式学习 |
 | BiLSTM 自编码器 | `bilstm_ae.py` | 双向 LSTM，捕捉前后向依赖 | 需要完整时序上下文的场景 |
-| BiLSTM + DETSEC 注意力 | `bilstm_ae_attantion.py` | 双向 LSTM + 注意力机制，自动学习时间步重要性 | 复杂时序模式，需要关注关键时间点的场景 |
-| BiLSTM + 注意力 v2 | `bilstm_ae_attention_v2.py` | 改进版注意力机制 | 更复杂的时序模式 |
-| BiLSTM + 注意力 v3 | `bilstm_ae_attention_v3.py` | 进一步优化的注意力机制 | 高精度特征提取 |
-| BiLSTM + 注意力 v4 | `bilstm_ae_attention_v4.py` | 增强的门控融合机制 | 复杂负载识别 |
-| BiLSTM + 注意力 v5 | `bilstm_ae_attention_v5.py` | 优化的训练策略 | 大规模数据集 |
-| BiLSTM + 注意力 v6 | `bilstm_ae_attention_v6.py` | 最新版本，综合优化 | 最复杂的时序分析任务 |
+| BiLSTM + DETSEC 注意力 | `bilstm_ae_attention.py` | 双向 LSTM + 注意力机制，自动学习时间步重要性 | 复杂时序模式，需要关注关键时间点的场景 |
 
 ## 模型架构对比
 
@@ -79,7 +74,7 @@
 import numpy as np
 from models.feature_extract.lstm_ae import lstm_ae
 from models.feature_extract.bilstm_ae import bilstm_ae
-from models.feature_extract.bilstm_ae_attantion import bilstm_ae_attention
+from models.feature_extract.bilstm_ae_attention import bilstm_ae_attention
 
 # 创建示例数据
 data = np.random.rand(100, 50, 1)  # 100个样本，50个时间步，1个特征
@@ -133,8 +128,7 @@ wf.add_step(feature_step)
 |------|---------|------|
 | 计算资源有限，需要快速训练 | `lstm_ae.py` | 结构简单，计算效率高 |
 | 需要捕捉双向时序依赖 | `bilstm_ae.py` | 双向 LSTM 能够同时考虑过去和未来信息 |
-| 复杂负载识别，需要关注关键时间点 | `bilstm_ae_attantion.py` | 注意力机制能够自动学习时间步的重要性 |
-| 高精度要求，复杂时序模式 | 注意力 v2-v6 | 版本越新，性能和稳定性越好 |
+| 复杂负载识别，需要关注关键时间点 | `bilstm_ae_attention.py` | 注意力机制能够自动学习时间步的重要性 |
 
 ## 性能对比
 
@@ -173,4 +167,3 @@ wf.add_step(feature_step)
 |------|------|------|
 | v1 | LSTM, BiLSTM | 基础自编码器实现 |
 | v2 | BiLSTM + 注意力 | 添加 DETSEC 风格注意力机制 |
-| v3-v6 | 注意力系列 | 逐步优化注意力机制和训练策略 |

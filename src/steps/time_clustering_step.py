@@ -850,6 +850,24 @@ class TimeClusteringStep(Step):
 
         data_np, feature_matrix, seq_len = self.load_data(context)
 
+        # Clean NaNs and Infs from features to prevent clustering failure (e.g., KMeans/DBSCAN)
+        if feature_matrix is not None:
+            # Check for non-finite values (NaN, Inf)
+            if feature_matrix.ndim > 1:
+                invalid_mask = ~np.isfinite(feature_matrix).all(axis=tuple(range(1, feature_matrix.ndim)))
+            else:
+                invalid_mask = ~np.isfinite(feature_matrix)
+                
+            if invalid_mask.any():
+                n_invalid = np.sum(invalid_mask)
+                print(f"[TimeClustering] Warning: Found {n_invalid} samples with NaN/Inf in features. Removing them.")
+                valid_mask = ~invalid_mask
+                feature_matrix = feature_matrix[valid_mask]
+                if data_np is not None:
+                    data_np = data_np[valid_mask]
+                if seq_len is not None:
+                    seq_len = seq_len[valid_mask]
+
         # Validate visualization/index selection early to fail fast with clear diagnostics.
         self._validate_col_index(data_np)
 
@@ -1013,5 +1031,13 @@ class TimeClusteringStep(Step):
         context['clustering_metrics'] = quant_metrics
 
         print(f"[TimeClustering] Clustering workflow complete")
+        
+        # Sliding context release: Step 4 (TimeClustering) releases Step 2 (WaveletSeparation) data
+        if 'data' in context:
+            for key in ['X', 'lengths']:
+                if key in context['data']:
+                    print(f"[TimeClustering] Releasing Step 2 (WaveletSeparation) context data: {key}")
+                    del context['data'][key]
+
         gc.collect()
         return context

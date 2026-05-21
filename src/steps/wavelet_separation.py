@@ -6,7 +6,7 @@ import os
 import gc
 import shutil
 from scipy.signal import medfilt
-from models.claspy.segmentation import BinaryClaSPSegmentation
+from models.time_segmentation.claspy.segmentation import BinaryClaSPSegmentation
 from src.framework.step import Step
 
 class WaveletSeparationStep(Step):

@@ -14,7 +14,7 @@ project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
 sys.path.insert(0, project_root)
 
 # Import vendored claspy
-from models.claspy.segmentation import BinaryClaSPSegmentation
+from models.time_segmentation.claspy.segmentation import BinaryClaSPSegmentation
 from src.steps.extract_active_data_step import ApplianceDataSegmenter
 
 def get_sequence_id():
@@ -200,15 +200,16 @@ def main():
     input_file = "/home/scnu2023024258/data/code/PSLG-NILM/input/washing_machine.csv"
     appliance_name = "washing_machine"
     sequence_id = get_sequence_id()
+    run_id = f"visualize_separation_{sequence_id}"
     
-    # According to GUIDELINES.md
-    output_root = os.path.join(project_root, "output", sequence_id)
+    # According to GUIDELINES.md: output/{run_id}/
+    output_root = os.path.join(project_root, "output", run_id)
     figure_dir = os.path.join(output_root, "figure")
     segments_dir = os.path.join(output_root, "segments")
     os.makedirs(figure_dir, exist_ok=True)
     os.makedirs(segments_dir, exist_ok=True)
     
-    print(f"Sequence ID: {sequence_id}")
+    print(f"Run ID: {run_id}")
     print(f"Output directory: {output_root}")
     
     # 1. Extract segments using ApplianceDataSegmenter (matching main.py logic)

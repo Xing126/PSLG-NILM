@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J combine-train-test
+#SBATCH -J PSLG-NILM
 #SBATCH -p RTX3090
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
@@ -29,7 +29,7 @@ echo "Modules loaded."
 
 # --- 4. 激活 Conda 环境 ---
 source $(conda info --base)/bin/activate
-conda activate nilm_genenal
+conda activate PSLG-NILM
 echo "Conda environment activated: $CONDA_DEFAULT_ENV"
 
 # --- 5. 执行数据预处理与训练脚本 ---

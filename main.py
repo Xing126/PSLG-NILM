@@ -65,7 +65,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         extract_config = config['steps']['feature_extract']
         wf.add_step(FeatureExtractStep(
             name="FeatureExtract",
-            model_name=extract_config.get('model_name', 'bilstm_ae'),
+            model_name=extract_config.get('model_name', 'detsec'),
             latent_dim=extract_config.get('latent_dim', 64),
             epochs=extract_config.get('epochs', 50),
             batch_size=extract_config.get('batch_size', 32),

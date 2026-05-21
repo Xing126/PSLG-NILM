@@ -422,5 +422,12 @@ class DatasetSplitStep(Step):
             f"test_a events(few/non)={len(few_test)}/{len(non_test)}, "
             f"test_b events(few/non)={len(few_test)}/0"
         )
+        
+        # Sliding context release: Step 6 (DatasetSplit) releases Step 4 (TimeClustering) data
+        for key in ['cluster_labels', 'evaluation_metrics', 'clustering_metrics']:
+            if key in context:
+                print(f"[DatasetSplit] Releasing Step 4 (TimeClustering) context data: {key}")
+                del context[key]
+
         gc.collect()
         return context

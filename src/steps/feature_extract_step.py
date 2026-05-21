@@ -7,7 +7,7 @@ import tensorflow as tf
 from src.framework.step import Step
 from models.feature_extract.lstm_ae import lstm_ae
 from models.feature_extract.bilstm_ae import bilstm_ae
-from models.feature_extract.bilstm_ae_attantion import bilstm_ae_attention
+from models.feature_extract.bilstm_ae_attention import bilstm_ae_attention
 from models.feature_extract.detsec_model import detsec_ae
 
 
@@ -341,6 +341,11 @@ class FeatureExtractStep(Step):
         }
         print("\n[FeatureExtract] Successfully extracted features")
         
+        # Sliding context release: Step 3 (FeatureExtract) releases Step 1 (ExtractActiveData) data
+        if 'data' in context and 'extract_active_data' in context['data']:
+            print("[FeatureExtract] Releasing Step 1 (ExtractActiveData) context data")
+            del context['data']['extract_active_data']
+
         print("\n" + "="*70)
         print("[FeatureExtract] Step completed")
         print("="*70)

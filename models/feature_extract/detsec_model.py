@@ -2,7 +2,9 @@ import os
 import time
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import GRUCell, RNN, Dense
+import keras
+from keras import ops
+from tensorflow.keras.layers import GRUCell, RNN, Dense, Layer
 from sklearn.cluster import KMeans
 from sklearn.utils import shuffle
 from models.base_model import BaseModel
@@ -28,23 +30,45 @@ def get_batch(X, i, batch_size, seq_len=None):
 # ===================== 核心机制 =====================
 def gate(vec):
     """门控函数"""
-    mask = Dense(vec.shape[1], activation='sigmoid')(vec)
+    mask = Dense(ops.shape(vec)[1], activation='sigmoid')(vec)
     return mask
 
-def attention(outputs_list, nunits, attention_size):
-    """注意力机制"""
-    outputs = tf.stack(outputs_list, axis=1)
-    W_omega = tf.Variable(tf.random.normal([nunits, attention_size], stddev=0.1))
-    b_omega = tf.Variable(tf.random.normal([attention_size], stddev=0.1))
-    u_omega = tf.Variable(tf.random.normal([attention_size], stddev=0.1))
+class AttentionLayer(Layer):
+    """注意力机制层"""
+    def __init__(self, nunits, attention_size, **kwargs):
+        super(AttentionLayer, self).__init__(**kwargs)
+        self.nunits = nunits
+        self.attention_size = attention_size
 
-    v = tf.tanh(tf.tensordot(outputs, W_omega, axes=1) + b_omega)
-    vu = tf.tensordot(v, u_omega, axes=1)
-    alphas = tf.nn.softmax(vu)
+    def build(self, input_shape):
+        self.W_omega = self.add_weight(
+            name="W_omega",
+            shape=(self.nunits, self.attention_size),
+            initializer=tf.keras.initializers.RandomNormal(stddev=0.1),
+            trainable=True,
+        )
+        self.b_omega = self.add_weight(
+            name="b_omega",
+            shape=(self.attention_size,),
+            initializer=tf.keras.initializers.RandomNormal(stddev=0.1),
+            trainable=True,
+        )
+        self.u_omega = self.add_weight(
+            name="u_omega",
+            shape=(self.attention_size,),
+            initializer=tf.keras.initializers.RandomNormal(stddev=0.1),
+            trainable=True,
+        )
+        super(AttentionLayer, self).build(input_shape)
 
-    output = tf.reduce_sum(outputs * tf.expand_dims(alphas, -1), 1)
-    output = tf.reshape(output, [-1, nunits])
-    return output
+    def call(self, inputs):
+        # inputs shape: (batch, seq_len, nunits)
+        v = ops.tanh(ops.add(ops.dot(inputs, self.W_omega), self.b_omega))
+        vu = ops.dot(v, self.u_omega)
+        alphas = ops.softmax(vu, axis=1)
+        output = ops.sum(ops.multiply(inputs, ops.expand_dims(alphas, -1)), axis=1)
+        output = ops.reshape(output, [-1, self.nunits])
+        return output
 
 # ===================== DETSEC 模型类 =====================
 class DETSECModel(BaseModel):
@@ -69,13 +93,17 @@ class DETSECModel(BaseModel):
         with tf.name_scope("AE3_Model"):
             # input_t shape: (batch, seq_len, dim)
             n_splits = input_t.shape[1]
-            x_list = [input_t[:, i, :] for i in range(n_splits)]
-            x_list_bw = tf.stack(x_list[::-1], axis=1)
-            x_list = tf.stack(x_list, axis=1)
+            if n_splits is None:
+                n_splits = ops.shape(input_t)[1]
+            
+            x_list = input_t
+            x_list_bw = ops.flip(input_t, axis=1)
 
             # RNN 掩码
-            seq_len_for_mask = tf.math.minimum(seqL, n_splits)
-            rnn_mask = tf.sequence_mask(seq_len_for_mask, maxlen=n_splits)
+            seq_len_for_mask = ops.minimum(ops.cast(seqL, "int32"), n_splits)
+            mask_indices = ops.cast(ops.arange(n_splits), "int32")[None, :]
+            mask_threshold = ops.cast(seq_len_for_mask, "int32")[:, None]
+            rnn_mask = ops.less(mask_indices, mask_threshold)
 
             # 编码器
             with tf.name_scope("encoderFWL"):
@@ -86,19 +114,20 @@ class DETSECModel(BaseModel):
                 cellEncoderBW = GRUCell(self.nunits)
                 outputsEncLBW = RNN(cellEncoderBW, return_sequences=True)(x_list_bw, mask=rnn_mask)
 
-            final_list_fw = [outputsEncLFW[:, i, :] for i in range(n_splits)]
-            final_list_bw = [outputsEncLBW[:, i, :] for i in range(n_splits)]
-            
-            encoder_fw = attention(final_list_fw, self.nunits, self.attention_size)
-            encoder_bw = attention(final_list_bw, self.nunits, self.attention_size)
+            # 使用 AttentionLayer
+            encoder_fw = AttentionLayer(self.nunits, self.attention_size)(outputsEncLFW)
+            encoder_bw = AttentionLayer(self.nunits, self.attention_size)(outputsEncLBW)
             
             # 融合编码特征并映射到 latent_dim
-            combined_encoder = gate(encoder_fw) * encoder_fw + gate(encoder_bw) * encoder_bw
+            combined_encoder = ops.add(
+                ops.multiply(gate(encoder_fw), encoder_fw),
+                ops.multiply(gate(encoder_bw), encoder_bw)
+            )
             encoder = Dense(self.latent_dim, name="embedding")(combined_encoder)
 
             # 解码器
-            x_list2decode = tf.stack([tf.identity(encoder) for _ in range(n_splits)], axis=1)
-            x_list2decode_bw = tf.stack([tf.identity(encoder) for _ in range(n_splits)], axis=1)
+            x_list2decode = ops.repeat(ops.expand_dims(encoder, 1), n_splits, axis=1)
+            x_list2decode_bw = ops.repeat(ops.expand_dims(encoder, 1), n_splits, axis=1)
 
             with tf.name_scope("decoderG"):
                 cellDecoder = GRUCell(self.nunits)
@@ -108,14 +137,9 @@ class DETSECModel(BaseModel):
                 cellDecoderBW = GRUCell(self.nunits)
                 outputsDecGFW = RNN(cellDecoderBW, return_sequences=True)(x_list2decode_bw, mask=rnn_mask)
 
-            out_list = []
-            out_list_bw = []
-            for i in range(n_splits):
-                out_list.append(Dense(n_dims)(outputsDecG[:, i, :]))
-                out_list_bw.append(Dense(n_dims)(outputsDecGFW[:, i, :]))
-
-            reconstruct = tf.stack(out_list, axis=1)
-            reconstruct2 = tf.stack(out_list_bw, axis=1)
+            # Dense 层可以直接处理 3D 张量
+            reconstruct = Dense(n_dims)(outputsDecG)
+            reconstruct2 = Dense(n_dims)(outputsDecGFW)
 
         return reconstruct, reconstruct2, encoder
 

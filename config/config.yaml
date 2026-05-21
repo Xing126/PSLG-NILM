@@ -4,9 +4,9 @@
 workflow:
   name: "Primitive State Segmentation and Clustering"
   description: "Standard ML workflow for processing and training on input data."
-  appliance_name: "kettle" 
+  appliance_name: "washing_machine" 
   resume: true #设置为true有done会跳过已执行的step
-  sequence_id: ""
+  sequence_id: "20260520_135010"
 
 # Step-specific configurations
 steps:
@@ -18,18 +18,13 @@ steps:
     context_seconds: 60
     set_input_root: true
 
-  data_processor:
-    enabled: false
-    normalization: true
-    save_figures: true
-
   wavelet_separation:
     enabled: true
     is_shape_dtw: false
     plot_count: 0
 
   feature_extract:
-    enabled: false
+    enabled: true
     data_path: ""
     seq_len_path: ""
     model_name: "detsec"  # lstm_ae / bilstm_ae / bilstm_ae_attention / detsec
@@ -41,10 +36,10 @@ steps:
     attention_size: 32
   
   time_clustering:
-    enabled: false
-    data_path: ""
-    feature_path: ""
-    seq_len_path: ""
+    enabled: true
+    data_path: "" 
+    feature_path: "" 
+    seq_len_path: "" 
     cluster_method: "kmeans-scan"  # dbscan / dbscan-scan / kmeans / kmeans-scan / hdbscan
     method_specific:
       dbscan:
