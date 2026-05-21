@@ -108,11 +108,32 @@ class PrimitiveActivityMappingStep(Step):
 			pass
 		return None
 
-	def _extract_ranges_from_array(self, arr: np.ndarray, file_name: str, file_path: str) -> List[Dict[str, Any]]:
+	def _extract_ranges_from_array(
+		self, 
+		arr: np.ndarray, 
+		file_name: str, 
+		file_path: str,
+		indices: Optional[np.ndarray] = None,
+		lengths: Optional[np.ndarray] = None
+	) -> List[Dict[str, Any]]:
 		records: List[Dict[str, Any]] = []
 
-		def build_record(ts_values: np.ndarray, primitive_idx: int) -> Optional[Dict[str, Any]]:
-			if ts_values.ndim != 1 or ts_values.size == 0:
+		def build_record(ts_values: Optional[np.ndarray], primitive_idx: int) -> Optional[Dict[str, Any]]:
+			# If we have indices, we don't rely on timestamps from the array itself
+			# (especially since X.npy channel 0 is original signal, not timestamps)
+			if indices is not None and lengths is not None:
+				return {
+					'primitive_file_name': file_name,
+					'primitive_file_path': file_path,
+					'primitive_index': int(primitive_idx),
+					'activity_csv_idx': int(indices[primitive_idx, 0]),
+					'start_index_in_csv': int(indices[primitive_idx, 1]),
+					'sample_length': int(lengths[primitive_idx, 0]),
+					'start_timestamp': 0.0, # Placeholder, will be updated in matching
+					'end_timestamp': 0.0,   # Placeholder, will be updated in matching
+				}
+
+			if ts_values is None or ts_values.ndim != 1 or ts_values.size == 0:
 				return None
 			valid = np.isfinite(ts_values)
 			# Padding points are often zeros; keep positive finite timestamps.
@@ -139,10 +160,17 @@ class PrimitiveActivityMappingStep(Step):
 				sample = arr[i]
 				if sample.ndim != 2 or sample.shape[1] < 1:
 					continue
-				record = build_record(sample[:, 0], i)
+				
+				# If we have indices, build record directly without checking timestamps in array
+				if indices is not None and lengths is not None:
+					record = build_record(None, i)
+				else:
+					record = build_record(sample[:, 0], i)
+					
 				if record is not None:
 					records.append(record)
 		elif arr.ndim == 2:
+			# Fallback for 2D arrays (not produced by TimeSegmentation)
 			ts_values = arr[:, 0] if arr.shape[1] >= 1 else arr.reshape(-1)
 			record = build_record(ts_values, 0)
 			if record is not None:
@@ -159,17 +187,48 @@ class PrimitiveActivityMappingStep(Step):
 		if not primitive_path.exists():
 			raise FileNotFoundError(f"[PrimitiveActivityMapping] Primitive directory not found: {primitive_dir}")
 
+		# Load indices and lengths if they exist (produced by TimeSegmentationStep)
+		indices = None
+		lengths = None
+		indices_path = primitive_path / "indices.npy"
+		lengths_path = primitive_path / "lengths.npy"
+		
+		if indices_path.exists():
+			try:
+				indices = np.load(indices_path)
+				print(f"[PrimitiveActivityMapping] Loaded indices.npy from {primitive_dir}")
+			except Exception as e:
+				print(f"[PrimitiveActivityMapping] Error loading indices.npy: {e}")
+				
+		if lengths_path.exists():
+			try:
+				lengths = np.load(lengths_path)
+				print(f"[PrimitiveActivityMapping] Loaded lengths.npy from {primitive_dir}")
+			except Exception as e:
+				print(f"[PrimitiveActivityMapping] Error loading lengths.npy: {e}")
+
 		records: List[Dict[str, Any]] = []
 		npy_files = sorted(primitive_path.glob('*.npy'))
 
 		for npy_file in npy_files:
+			# Skip metadata files
+			if npy_file.name in ("indices.npy", "lengths.npy"):
+				continue
+				
 			try:
 				arr = np.load(npy_file)
 			except Exception as e:
 				print(f"[PrimitiveActivityMapping] Skip unreadable npy {npy_file.name}: {e}")
 				continue
 
-			file_records = self._extract_ranges_from_array(arr, npy_file.name, str(npy_file))
+			# Use indices only for X.npy (main tensor)
+			curr_indices = indices if npy_file.name == "X.npy" else None
+			curr_lengths = lengths if npy_file.name == "X.npy" else None
+			
+			file_records = self._extract_ranges_from_array(
+				arr, npy_file.name, str(npy_file),
+				indices=curr_indices, lengths=curr_lengths
+			)
 			if not file_records:
 				print(f"[PrimitiveActivityMapping] No valid primitive ranges from {npy_file.name}")
 				continue
@@ -180,6 +239,28 @@ class PrimitiveActivityMappingStep(Step):
 			rec['primitive_global_index'] = int(i)
 
 		return records
+
+	def _get_timestamps_from_csv(self, file_path: str, start_idx: int, length: int) -> tuple[Optional[float], Optional[float]]:
+		"""Read start and end timestamps from a specific CSV segment."""
+		try:
+			# Use pandas to read only the necessary rows and first column (timestamp)
+			# skiprows handles the header and rows before our segment
+			# nrows handles the segment length
+			df = pd.read_csv(file_path, usecols=[0], skiprows=range(1, start_idx + 1), nrows=length)
+			if df.empty:
+				return None, None
+			
+			start_ts = df.iloc[0, 0]
+			end_ts = df.iloc[-1, 0]
+			
+			# Handle potential numpy types
+			start_ts = start_ts.item() if hasattr(start_ts, 'item') else start_ts
+			end_ts = end_ts.item() if hasattr(end_ts, 'item') else end_ts
+			
+			return float(start_ts), float(end_ts)
+		except Exception as e:
+			print(f"[PrimitiveActivityMapping] Error reading timestamps from {file_path}: {e}")
+			return None, None
 
 	def _match_primitive_to_activity(
 		self,
@@ -203,6 +284,8 @@ class PrimitiveActivityMappingStep(Step):
 					'file_path': a.get('file_path'),
 					'start': float(a_start),
 					'end': float(a_end),
+					'orig_start': a.get('start_timestamp'),
+					'orig_end': a.get('end_timestamp'),
 				}
 			)
 
@@ -242,6 +325,36 @@ class PrimitiveActivityMappingStep(Step):
 			return best, best_direction, (None if not np.isfinite(best_gap) else float(best_gap))
 
 		for p in primitive_records:
+			# Case A: Index-based matching (High priority, from TimeSegmentation indices.npy)
+			if 'activity_csv_idx' in p:
+				csv_idx = p['activity_csv_idx']
+				if 0 <= csv_idx < len(activity_records):
+					target_a = activity_records[csv_idx]
+					
+					# Get precise timestamps from CSV segment
+					start_idx = p.get('start_index_in_csv', 0)
+					length = p.get('sample_length', 1)
+					p_start, p_end = self._get_timestamps_from_csv(target_a['file_path'], start_idx, length)
+					
+					if p_start is not None and p_end is not None:
+						matches.append({
+							'primitive_global_index': p['primitive_global_index'],
+							'primitive_file_name': p['primitive_file_name'],
+							'primitive_index': p['primitive_index'],
+							'primitive_start_timestamp': p_start,
+							'primitive_end_timestamp': p_end,
+							'activity_file_name': target_a['file_name'],
+							'activity_file_path': target_a['file_path'],
+							'activity_start_timestamp': target_a['start_timestamp'],
+							'activity_end_timestamp': target_a['end_timestamp'],
+							'match_type': 'index_match',
+							'tolerance_used': 0.0,
+						})
+						continue
+					else:
+						print(f"[PrimitiveActivityMapping][WARN] Index match failed for primitive {p['primitive_index']} in {p['primitive_file_name']} (timestamp extraction failed)")
+
+			# Case B: Timestamp-based matching (Fallback or for other types of primitives)
 			p_start = self._to_numeric_ts(p.get('start_timestamp'))
 			p_end = self._to_numeric_ts(p.get('end_timestamp'))
 			if p_start is None or p_end is None:
@@ -265,8 +378,8 @@ class PrimitiveActivityMappingStep(Step):
 						'primitive_end_timestamp': p_end,
 						'activity_file_name': strict_hit['file_name'],
 						'activity_file_path': strict_hit['file_path'],
-						'activity_start_timestamp': strict_hit['start'],
-						'activity_end_timestamp': strict_hit['end'],
+						'activity_start_timestamp': strict_hit['orig_start'],
+						'activity_end_timestamp': strict_hit['orig_end'],
 						'match_type': 'contain',
 						'tolerance_used': 0.0,
 					}
@@ -289,8 +402,8 @@ class PrimitiveActivityMappingStep(Step):
 							'primitive_end_timestamp': p_end,
 							'activity_file_name': tolerant_hit['file_name'],
 							'activity_file_path': tolerant_hit['file_path'],
-							'activity_start_timestamp': tolerant_hit['start'],
-							'activity_end_timestamp': tolerant_hit['end'],
+							'activity_start_timestamp': tolerant_hit['orig_start'],
+							'activity_end_timestamp': tolerant_hit['orig_end'],
 							'match_type': 'tolerant_contain',
 							'tolerance_used': tol,
 						}
@@ -323,8 +436,8 @@ class PrimitiveActivityMappingStep(Step):
 					'primitive_end_timestamp': p_end,
 					'activity_file_name': nearest_a['file_name'] if nearest_a else None,
 					'activity_file_path': nearest_a['file_path'] if nearest_a else None,
-					'activity_start_timestamp': nearest_a['start'] if nearest_a else None,
-					'activity_end_timestamp': nearest_a['end'] if nearest_a else None,
+					'activity_start_timestamp': nearest_a['orig_start'] if nearest_a else None,
+					'activity_end_timestamp': nearest_a['orig_end'] if nearest_a else None,
 					'match_type': direction,
 					'tolerance_used': tol,
 					'mismatch_gap': gap,
@@ -419,7 +532,7 @@ class PrimitiveActivityMappingStep(Step):
 		matched_activity_files = {
 			rec['activity_file_name']
 			for rec in match_records
-			if rec.get('activity_file_name') and rec.get('match_type') in ('contain', 'tolerant_contain')
+			if rec.get('activity_file_name') and rec.get('match_type') in ('contain', 'tolerant_contain', 'index_match')
 		}
 		few_shot_activity_records = [
 			rec for rec in activity_records
