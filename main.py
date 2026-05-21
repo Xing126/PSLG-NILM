@@ -55,19 +55,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
                 set_input_root=extract_active_cfg.get("set_input_root", True),
             )
         )
-
-    if config['steps'].get('time_segmentation', {}).get('enabled', True):
-        segment_cfg = config['steps']['time_segmentation']
-        wf.add_step(TimeSegmentationStep(
-            name="TimeSegmentation",
-            segment_method=segment_cfg.get('segment_method', 'clasp'),
-            appliance_name=appliance_name,
-            # fluss params
-            window_size=segment_cfg.get('window_size', 100),
-            n_regimes=segment_cfg.get('n_regimes', 3),
-            excl_factor=segment_cfg.get('excl_factor', 5)
-        ))
-
+    
     if config['steps'].get('feature_extract', {}).get('enabled', True):
         extract_config = config['steps']['feature_extract']
         wf.add_step(FeatureExtractStep(

@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib
+matplotlib.use('Agg') # 强制使用非交互式后端，防止在服务器上挂起
 import matplotlib.pyplot as plt
 import stumpy
 
@@ -236,27 +238,24 @@ def fluss_visualize(ts, mp=None, mpi=None, ac=None, cac=None, segments=None, win
 
     plt.tight_layout()
 
-    # 捕获键盘输入，询问是否保存结果
-    user_input = input("是否保存可视化图片到 analyze_result 文件夹？(y/n): ")
-    if user_input.lower() == 'y':
-        import os
-        from datetime import datetime
+    # 在非交互式环境下，直接保存不询问
+    import os
+    from datetime import datetime
 
-        # 创建保存目录
-        save_dir = r'../../ukdale_disaggregate/analyze_result'
+    # 创建保存目录
+    save_dir = r'../../ukdale_disaggregate/analyze_result'
+    try:
         os.makedirs(save_dir, exist_ok=True)
-
         # 生成时间戳用于文件名
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
         # 保存图片
         filename = os.path.join(save_dir, f'fluss_analysis_{timestamp}.png')
         plt.savefig(filename, dpi=300, bbox_inches='tight')
-        plt.show()
-
         print(f"可视化图片已保存到 {filename}")
-    else:
-        plt.show()
+    except Exception as e:
+        print(f"保存图片失败: {e}")
+    
+    plt.close() # 释放内存
 
 
 

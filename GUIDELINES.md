@@ -39,7 +39,10 @@
   - **路径关联**: 
     - 中间结果与缓存：`log/{run_id}/`。
     - 最终输出与图表：`output/{run_id}/`。
-  - **工具类支持**: `src/utlis/` 中的脚本在运行时应读取该 ID，并根据上述规范将产物自动归档到对应的 `log` 或 `output` 目录下。
+  - **工具类支持**: `src/utlis/` 中的脚本在运行时应遵循以下逻辑：
+    - **优先级 1**: 读取命令行提供的第一个参数作为 `Run ID` 或目录路径。
+    - **优先级 2**: 若无命令行参数，自动读取 `config/config.yaml` 中的 `appliance_name` 和 `sequence_id` 并组合为 `{appliance_name}_{sequence_id}` 作为默认 `Run ID`。
+    - **路径自动关联**: 根据解析出的 `Run ID` 自动定位 `log/{run_id}/` 或 `output/{run_id}/`，实现一键式可视化分析。
 
 ---
 

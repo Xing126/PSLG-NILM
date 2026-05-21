@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 from scipy.signal import medfilt
 
-# Add project root to sys.path
+# Add project root and models/time_segmentation to sys.path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+sys.path.insert(0, os.path.join(project_root, "models", "time_segmentation"))
 
 # Import dependencies
 from models.time_segmentation.claspy.segmentation import BinaryClaSPSegmentation
@@ -121,15 +122,35 @@ def plot_final_segments(signal, synth_cp, output_path, title):
     plt.close()
     print(f"Saved plot: {output_path}")
 
-def main():
+def main(arg=None):
     # 1. Load configuration
     config = load_config()
-    appliance_name = config['workflow'].get('appliance_name', 'unknown_appliance')
-    sequence_id = config['workflow'].get('sequence_id', datetime.now().strftime("%Y%m%d_%H%M%S"))
     
-    # 2. Define Run ID and Paths (GUIDELINES.md Section 2)
-    # Format: {script_name}_{sequence_id}
-    run_id = f"visualize_segments_{sequence_id}"
+    if arg is None:
+        # Default to config if no arg provided
+        workflow_cfg = config.get('workflow', {})
+        appliance_name = workflow_cfg.get('appliance_name', 'unknown_appliance')
+        sequence_id = workflow_cfg.get('sequence_id')
+        
+        if sequence_id:
+            run_id = f"{appliance_name}_{sequence_id}"
+            print(f"DEBUG: Found in config - appliance: {appliance_name}, seq_id: {sequence_id}")
+            print(f"Using combined Run ID from config: {run_id}")
+        else:
+            sequence_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_id = f"{appliance_name}_{sequence_id}"
+            print(f"Warning: sequence_id not found in config, using current time: {sequence_id}")
+            print(f"Using combined Run ID: {run_id}")
+    else:
+        # Use provided arg (could be full path or sequence_id)
+        if os.path.isdir(arg):
+            run_id = os.path.basename(arg.rstrip(os.sep))
+        else:
+            run_id = arg
+        print(f"Using provided Run ID: {run_id}")
+    
+    # 2. Define Paths (GUIDELINES.md Section 2)
+    # The output will be in output/{run_id}/
     output_root = os.path.join(project_root, "output", run_id)
     figure_dir = os.path.join(output_root, "figure")
     segments_dir = os.path.join(output_root, "segments")
@@ -190,4 +211,7 @@ def main():
     print(f"\nExecution Complete! Results saved to: {figure_dir}")
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1:
+        main(sys.argv[1])
+    else:
+        main()

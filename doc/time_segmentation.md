@@ -52,6 +52,11 @@
 -   **`lengths.npy`**: 
     - **形状**: `(n_samples, 1)`
     - **含义**: 记录每个样本在填充前的真实长度，用于后续模型处理变长序列。
+-   **`indices.npy`**: 
+    - **形状**: `(n_samples, 2)`
+    - **含义**: 记录每个样本的元数据索引：
+        - **Column 0**: CSV 文件索引（对应 `ExtractActiveData/segments` 目录下按字母排序后的文件列表索引）。
+        - **Column 1**: 切分点起始索引（该样本在原始 CSV 文件中的起始位置）。
 
 ### 3.2 上下文传递 (Context)
 
@@ -59,7 +64,8 @@
 ```python
 context['data'] = {
     'X': np_array,       # (n_samples, timestamp, 4)
-    'lengths': np_array  # (n_samples, 1)
+    'lengths': np_array, # (n_samples, 1)
+    'indices': np_array  # (n_samples, 2)
 }
 ```
 

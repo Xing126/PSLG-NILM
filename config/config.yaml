@@ -4,7 +4,7 @@
 workflow:
   name: "Primitive State Segmentation and Clustering"
   description: "Standard ML workflow for processing and training on input data."
-  appliance_name: "washing_machine" 
+  appliance_name: "microwave" 
   resume: true #设置为true有done会跳过已执行的step
   sequence_id: ""
 
@@ -12,7 +12,7 @@ workflow:
 steps:
   extract_active_data:
     enabled: true
-    input_file: "input/washing_machine.csv"
+    input_file: "input/microwave.csv"
     power_threshold: 1.0
     min_duration_seconds: 30
     context_seconds: 60
@@ -20,7 +20,7 @@ steps:
 
   time_segmentation: # 原 wavelet_separation
     enabled: true
-    segment_method: "espresso" # clasp / fluss / espresso
+    segment_method: "clasp" # clasp / fluss / espresso
     # fluss specific params
     window_size: 100
     n_regimes: 3
