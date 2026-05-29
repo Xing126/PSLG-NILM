@@ -9,11 +9,14 @@
 #SBATCH -e /home/scnu2023024258/data/code/PSLG-NILM/slurm_log/job-%x-%j.err
 #SBATCH --time=24:00:00
 
+CONFIG_PATH=${1:-config/recommand_config/config_dishwasher.yaml}
+
 # --- 1. 作业开始，打印基本信息 ---
 echo "Job started on: $(date)"
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on node: $(hostname)"
 echo "Allocated GPUs: $CUDA_VISIBLE_DEVICES"
+echo "Using config: $CONFIG_PATH"
 
 # --- 2. 创建日志和输出目录 ---
 mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/slurm_log
@@ -36,7 +39,7 @@ echo "Conda environment activated: $CONDA_DEFAULT_ENV"
 echo "Starting main.py..."
 cd /home/scnu2023024258/data/code/PSLG-NILM
 
-python main.py --config config/recommand_config/config_dishwasher.yaml
+python main.py --config "$CONFIG_PATH"
 
 if [ $? -eq 0 ]; then
     echo "Workflow executed successfully!"

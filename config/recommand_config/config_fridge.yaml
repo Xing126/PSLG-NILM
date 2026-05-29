@@ -24,9 +24,9 @@ steps:
     plot_count: 0
 
   feature_extract:
-    enabled: false
-    data_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\data_fusion.npy"
-    seq_len_path: "D:\\KnowledgeDatabase\\ComputerSecience\\PROJ_NILM\\PSLG-NILM\\data\\fridge\\seq_length_fusion.npy"
+    enabled: true
+    data_path: "input/fridge/data_fusion.npy"
+    seq_len_path: "input/fridge/seq_length_fusion.npy"
     model_name: "bilstm_ae"
     latent_dim: 64
     epochs: 50
@@ -36,7 +36,7 @@ steps:
     attention_size: 32
   
   time_clustering:
-    enabled: true
+    enabled: false
     data_path: "input/fridge/data_fusion.npy"
     feature_path: "input/fridge/bilstm_ae_features_cleaned_power_64_dim.npy"
     seq_len_path: "input/fridge/seq_length_fusion.npy"
