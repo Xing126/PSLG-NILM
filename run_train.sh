@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH -J PSLG-NILM
-#SBATCH -p A6000
+#SBATCH -p RTX3090
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
 #SBATCH --mem=32G
@@ -9,7 +9,7 @@
 #SBATCH -e /home/scnu2023024258/data/code/PSLG-NILM/slurm_log/job-%x-%j.err
 #SBATCH --time=24:00:00
 
-CONFIG_PATH=${1:-config/recommand_config/config_dishwasher.yaml}
+CONFIG_PATH=${1:-config/config.yaml}
 
 # --- 1. 作业开始，打印基本信息 ---
 echo "Job started on: $(date)"

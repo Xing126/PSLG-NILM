@@ -50,17 +50,19 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
 
     extract_active_cfg = config["steps"].get("extract_active_data", {})
     if extract_active_cfg.get("enabled", False):
+        # 提取核心参数，其余通过 **kwargs 传递给模型
+        step_params = extract_active_cfg.copy()
+        step_params.pop("enabled", None)
+        method = step_params.pop("method", "simple")
+        input_file = step_params.pop("input_file", "")
+        
         wf.add_step(
             ExtractActiveDataStep(
                 name="ExtractActiveData",
-                method=extract_active_cfg.get("method", "simple"),
+                method=method,
                 appliance_name=appliance_name,
-                input_file=extract_active_cfg.get("input_file", ""),
-                power_threshold=extract_active_cfg.get("power_threshold", 1.0),
-                min_duration_seconds=extract_active_cfg.get("min_duration_seconds", 30),
-                context_seconds=extract_active_cfg.get("context_seconds", 120),
-                fs=extract_active_cfg.get("fs", 1),
-                set_input_root=extract_active_cfg.get("set_input_root", True),
+                input_file=input_file,
+                **step_params
             )
         )
     

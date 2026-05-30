@@ -19,14 +19,13 @@ class ExtractActiveDataStep(Step):
         method: str = "simple",  # simple / adaptive
         appliance_name: str = "",
         input_file: str = "",
-        set_input_root: bool = True,
         **method_kwargs
     ):
         super().__init__(name)
         self.method = method.lower()
         self.appliance_name = appliance_name
         self.input_file = input_file
-        self.set_input_root = set_input_root
+        self.set_input_root = True  # 强制设为 True，不再从外部配置
         self.method_kwargs = method_kwargs
 
     def _get_detector(self, context: dict):
@@ -45,9 +44,13 @@ class ExtractActiveDataStep(Step):
         file_ext = os.path.splitext(input_file)[1].lower()
         if file_ext == '.csv':
             df = pd.read_csv(input_file)
-            if 'timestamp' in df.columns and 'power' in df.columns:
+            # 优先顺序: datetime (字符串/对象) > timestamp (数值)
+            if 'datetime' in df.columns and 'power' in df.columns:
+                return df['datetime'].values, df['power'].values
+            elif 'timestamp' in df.columns and 'power' in df.columns:
                 return df['timestamp'].values, df['power'].values
             else:
+                # 兜底：取前两列
                 return df.iloc[:, 0].values, df.iloc[:, 1].values
         elif file_ext == '.npy':
             data = np.load(input_file)
@@ -96,7 +99,7 @@ class ExtractActiveDataStep(Step):
         
         # 2. 获取并训练探测器
         detector = self._get_detector(context)
-        detector.train(powers)
+        detector.train(powers, timestamps)
         
         # 3. 执行检测
         print(f"[{self.name}] 使用方法 '{self.method}' 执行提取...")

@@ -3,7 +3,6 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
-import tensorflow as tf
 from src.framework.step import Step
 from models.feature_extract.cnn_ae import cnn_ae
 from models.feature_extract.lstm_ae import lstm_ae

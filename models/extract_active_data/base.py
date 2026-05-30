@@ -7,12 +7,12 @@ from models.base_model import BaseModel
 class BaseActiveDetector(BaseModel):
     def __init__(self, name: str, config: dict = None):
         super().__init__(name, config)
-        self.appliance_name = self.config.get("appliance_name", "appliance")
-        self.fs = self.config.get("fs", 1)
-        self.context_seconds = self.config.get("context_seconds", 60)
+        self.appliance_name = self.config.get("appliance_name") or "appliance"
+        self.fs = self.config.get("fs") if self.config.get("fs") is not None else 1
+        self.context_seconds = self.config.get("context_seconds") if self.config.get("context_seconds") is not None else 60
 
     @abstractmethod
-    def train(self, raw_power_series: np.ndarray):
+    def train(self, raw_power_series: np.ndarray, timestamps: np.ndarray = None):
         """学习提取参数"""
         pass
 
