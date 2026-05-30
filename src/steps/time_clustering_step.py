@@ -17,7 +17,7 @@ from src.framework.step import Step
 sys.stdout.flush()
 sys.stderr.flush()
 
-from src.utlis import clustering_utils
+from src.utils import clustering_utils
 
 
 class TimeClusteringStep(Step):
@@ -61,7 +61,7 @@ class TimeClusteringStep(Step):
         few_shot_threshold=5,
         appliance_name=""
     ):
-        super().__init__(name)
+        super().__init__(name, suffix=str(cluster_method).lower())
         self.data_path = data_path
         self.feature_path = feature_path
         self.seq_len_path = seq_len_path

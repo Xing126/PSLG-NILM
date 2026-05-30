@@ -64,8 +64,10 @@ def main(arg=None):
             # If it's a directory like log/run_id/ExtractActiveData/segments
             # We try to extract run_id from the path
             parts = arg.rstrip(os.sep).split(os.sep)
-            if "ExtractActiveData" in parts:
-                idx = parts.index("ExtractActiveData")
+            # Check if any part starts with ExtractActiveData
+            extract_part = next((p for p in parts if p.startswith("ExtractActiveData")), None)
+            if extract_part:
+                idx = parts.index(extract_part)
                 run_id = parts[idx-1]
             else:
                 run_id = os.path.basename(arg.rstrip(os.sep))
@@ -87,11 +89,15 @@ def main(arg=None):
     
     # Priority for segments directory:
     # 1. If arg is a directory, use it directly
-    # 2. Otherwise, use standard log path: log/{run_id}/ExtractActiveData/segments
+    # 2. Otherwise, use standard log path: log/{run_id}/ExtractActiveData_{method}/segments
     if arg and os.path.isdir(arg):
         segments_dir = arg
     else:
-        segments_dir = os.path.join(project_root, "log", run_id, "ExtractActiveData", "segments")
+        # Get method from config to build the correct folder name with suffix
+        extract_cfg = config.get('steps', {}).get('extract_active_data', {})
+        method = extract_cfg.get('method', 'simple').lower()
+        step_folder = f"ExtractActiveData_{method}"
+        segments_dir = os.path.join(project_root, "log", run_id, step_folder, "segments")
     
     print(f"Source segments directory: {segments_dir}")
     

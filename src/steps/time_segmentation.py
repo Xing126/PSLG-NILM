@@ -26,7 +26,7 @@ class TimeSegmentationStep(Step):
         n_regimes=3,
         excl_factor=5
     ):
-        super().__init__(name)
+        super().__init__(name, suffix=segment_method)
         self.segment_method = segment_method
         self.appliance_name = appliance_name
         # FLUSS specific params
@@ -44,14 +44,23 @@ class TimeSegmentationStep(Step):
     def get_segmentation_points(self, time_series, distance="znormed_euclidean_distance"):
         """Segmentation logic using BinaryClaSPSegmentation or FLUSS."""
         if self.segment_method == "fluss":
+            # Set threading limits before importing fluss/stumpy/numba
+            import os
+            os.environ['NUMBA_NUM_THREADS'] = '1'
+            os.environ['MKL_NUM_THREADS'] = '1'
+            os.environ['OPENBLAS_NUM_THREADS'] = '1'
+            
             from fluss import fluss
             try:
-                # Ensure input is 1D for FLUSS
-                ts_1d = time_series.flatten()
+                # Ensure input is 1D for FLUSS and converted to float64 to avoid stumpy dtype errors
+                ts_1d = time_series.flatten().astype(np.float64)
                 
                 # Check if length is sufficient for FLUSS
-                if len(ts_1d) < self.window_size + self.n_regimes:
-                    print(f"[TimeSegmentation] Skipping FLUSS: signal length ({len(ts_1d)}) too short for window_size ({self.window_size})")
+                # stumpy.stump needs enough points to have matches outside exclusion zone (window_size // 2)
+                # We recommend at least 2 * window_size to be safe
+                min_len = max(self.window_size * 2, self.window_size + self.n_regimes)
+                if len(ts_1d) < min_len:
+                    print(f"[TimeSegmentation] Skipping FLUSS: signal length ({len(ts_1d)}) too short, need at least {min_len}")
                     return []
 
                 _, change_points = fluss(

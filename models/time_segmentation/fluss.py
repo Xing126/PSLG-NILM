@@ -142,18 +142,48 @@ def find_boundaries(window_size, ac, cac, n_regimes, excl_zone):
 #     return ts, segments
 
 def fluss(ts, window_size, n_regimes=3, excl_factor=1, visualize=False):
+    # Ensure input is float64, contiguous, and handle NaN/Inf for stumpy/numba stability
+    ts = np.ascontiguousarray(np.asarray(ts).astype(np.float64))
+    if np.any(np.isnan(ts)) or np.any(np.isinf(ts)):
+        # Simple linear interpolation for NaNs/Infs if any (defensive)
+        mask = np.isfinite(ts)
+        if not np.all(mask):
+            ts = np.interp(np.arange(len(ts)), np.where(mask)[0], ts[mask])
+
     # 2. 计算 Matrix Profile
     # stumpy.stump 返回一个矩阵，第一列是距离(MP)，第二列是索引(MPI)
-    mp_res = stumpy.stump(ts, window_size)
-
+    # Using numba might cause segfaults in some environments, ensuring it's not parallelized
+    import os
+    os.environ['NUMBA_NUM_THREADS'] = '1'
+    
+    try:
+        mp_res = stumpy.stump(ts, window_size)
+        # Check if we got any valid matches
+        if np.all(np.isinf(mp_res[:, 0])):
+            print("[FLUSS] No valid matches found in Matrix Profile (signal might be too short or too repetitive)")
+            return ts, []
+    except Exception as e:
+        print(f"[FLUSS] stumpy.stump error: {e}")
+        return ts, []
+    
     # 提取 Matrix Profile Index (MPI)，这是 FLUSS 的输入
-    mpi = mp_res[:, 1]
+    # 确保 MPI 是 int64 类型，某些 stumpy 版本需要
+    mpi = mp_res[:, 1].astype(np.int64)
     mp = mp_res[:, 0]
 
     # 3. 计算 FLUSS
     # L: 子序列长度 (通常设为 m)
     # n_regimes: 你期望找到几个分割点 (如果不确定，可以看曲线最低点)
     # excl_factor: 排除区域因子 (默认 5)
+    # 检查排除区域是否超过了可用子序列
+    num_subseq = len(mpi)
+    if excl_factor * window_size >= num_subseq:
+        print(f"[FLUSS] excl_factor * window_size ({excl_factor * window_size}) is larger than number of subsegments ({num_subseq}). Reducing excl_factor.")
+        excl_factor = max(1, (num_subseq - 1) // window_size)
+        if excl_factor * window_size >= num_subseq:
+             print("[FLUSS] Signal still too short for FLUSS even with reduced excl_factor. Skipping.")
+             return ts, []
+
     cac, regime_locations = stumpy.fluss(mpi, L=window_size, n_regimes=n_regimes, excl_factor=excl_factor)
     print(f"检测到的分割点位置: {regime_locations}")
     if visualize:

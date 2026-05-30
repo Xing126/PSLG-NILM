@@ -21,7 +21,7 @@ class ExtractActiveDataStep(Step):
         input_file: str = "",
         **method_kwargs
     ):
-        super().__init__(name)
+        super().__init__(name, suffix=method.lower())
         self.method = method.lower()
         self.appliance_name = appliance_name
         self.input_file = input_file

@@ -59,6 +59,7 @@ class Workflow:
     def run(self):
         """Runs all steps in the order they were added."""
         self.logger.info("Starting workflow execution...")
+        force_run = False
         try:
             for i, step in enumerate(self.steps, 1):
                 self.logger.info(f"--- Step {i}: {step.name} ---")
@@ -66,7 +67,9 @@ class Workflow:
                 # Update context with current step log dir
                 step_log_dir = step.get_log_dir(self.context)
                 done_flag_path = os.path.join(step_log_dir, ".done")
-                if self.resume and os.path.exists(done_flag_path):
+                
+                # Resume logic: skip if done AND not forced by previous step change
+                if self.resume and not force_run and os.path.exists(done_flag_path):
                     self.context = step.restore(self.context)
                     self.logger.info(f"Step {step.name} skipped (already done).")
                     continue
@@ -75,6 +78,11 @@ class Workflow:
                 self.context = step.run(self.context)
                 with open(done_flag_path, "w", encoding="utf-8") as f:
                     f.write(self.sequence_id)
+                
+                # If a step is actually executed, force all subsequent steps to run to ensure consistency
+                if self.resume:
+                    force_run = True
+                    self.logger.info(f"Step {step.name} executed, will force subsequent steps to run for consistency.")
                 
                 self.logger.info(f"Step {step.name} completed successfully.")
             

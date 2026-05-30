@@ -49,7 +49,7 @@ class FeatureExtractStep(Step):
         data_path="",
         seq_len_path=""
     ):
-        super().__init__(name)
+        super().__init__(name, suffix=model_name)
         self.model_name = model_name
         self.latent_dim = latent_dim
         self.epochs = epochs

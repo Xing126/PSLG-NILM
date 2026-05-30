@@ -7,8 +7,9 @@ class Step(ABC):
     
     Provides default implementation for get_log_dir that supports appliance_name.
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, suffix: str = ""):
         self.name = name
+        self.suffix = suffix
         self.appliance_name = ""  # Default empty, can be set by subclasses
 
     @abstractmethod
@@ -29,11 +30,10 @@ class Step(ABC):
 
     def get_log_dir(self, context: dict) -> str:
         """
-        Get the specific log directory for this step, optionally with appliance name.
+        Get the specific log directory for this step, optionally with appliance name and suffix.
         
-        Supports appliance_name for organizing logs by device type:
-        - With appliance_name: log/{appliance_name}_{sequence_id}/{step_name}/
-        - Without appliance_name: log/{sequence_id}/{step_name}/
+        Supports appliance_name for organizing logs by device type and suffix for model/method.
+        - Directory name: {step_name}_{suffix} (if suffix exists) or {step_name}
         
         Args:
             context (dict): Shared context containing sequence_id and log_root
@@ -42,6 +42,11 @@ class Step(ABC):
             str: Path to step's log directory
         """
         log_root = context.get('log_root', os.path.join('log', 'default'))
-        step_log_dir = os.path.join(log_root, self.name)
+        
+        step_folder_name = self.name
+        if self.suffix:
+            step_folder_name = f"{self.name}_{self.suffix}"
+            
+        step_log_dir = os.path.join(log_root, step_folder_name)
         os.makedirs(step_log_dir, exist_ok=True)
         return step_log_dir

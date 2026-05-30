@@ -40,8 +40,15 @@ def main(arg=None):
         # Use provided arg (could be full path or sequence_id)
         if os.path.isdir(arg):
             parts = arg.rstrip(os.sep).split(os.sep)
-            if "ExtractActiveData" in parts:
-                idx = parts.index("ExtractActiveData")
+            # Check if any part starts with ExtractActiveData or TimeSegmentation
+            extract_part = next((p for p in parts if p.startswith("ExtractActiveData")), None)
+            seg_part = next((p for p in parts if p.startswith("TimeSegmentation")), None)
+            
+            if extract_part:
+                idx = parts.index(extract_part)
+                run_id = parts[idx-1]
+            elif seg_part:
+                idx = parts.index(seg_part)
                 run_id = parts[idx-1]
             elif "log" in parts:
                 idx = parts.index("log")
@@ -59,28 +66,43 @@ def main(arg=None):
     print(f"Starting reconstruction visualization for Run ID: {run_id}")
     
     # Check if TimeSegmentation data exists
-    time_seg_dir = os.path.join(log_root, "TimeSegmentation")
+    # Get segment_method from config to build the correct folder name with suffix
+    seg_cfg = config.get('steps', {}).get('time_segmentation', {})
+    seg_method = seg_cfg.get('segment_method', 'clasp').lower()
+    time_seg_folder = f"TimeSegmentation_{seg_method}"
+    
+    time_seg_dir = os.path.join(log_root, time_seg_folder)
     if not os.path.exists(time_seg_dir) or not os.path.exists(os.path.join(time_seg_dir, "X.npy")):
         print(f"Error: TimeSegmentation logs not found in {time_seg_dir}")
         print("This tool requires output from TimeSegmentationStep (X.npy, lengths.npy, indices.npy).")
         return
 
-    visualize_from_logs(log_root, output_root)
+    visualize_from_logs(log_root, output_root, config)
 
-def visualize_from_logs(log_dir, output_root):
+def visualize_from_logs(log_dir, output_root, config):
     """
     Reconstructs changepoints from TimeSegmentation output files (X.npy, lengths.npy, indices.npy)
     and visualizes them on the original signals.
     """
-    time_seg_dir = os.path.join(log_dir, "TimeSegmentation")
+    # Get segment_method from config
+    seg_cfg = config.get('steps', {}).get('time_segmentation', {})
+    seg_method = seg_cfg.get('segment_method', 'clasp').lower()
+    time_seg_folder = f"TimeSegmentation_{seg_method}"
+    time_seg_dir = os.path.join(log_dir, time_seg_folder)
+    
     figure_dir = os.path.join(output_root, "figure")
     os.makedirs(figure_dir, exist_ok=True)
+    
+    # Get extract method from config
+    extract_cfg = config.get('steps', {}).get('extract_active_data', {})
+    extract_method = extract_cfg.get('method', 'simple').lower()
+    extract_folder = f"ExtractActiveData_{extract_method}"
     
     # Try different possible locations for input CSVs (DataLoader or ExtractActiveData)
     possible_dataloader_dirs = [
         os.path.join(log_dir, "DataLoader"),
-        os.path.join(log_dir, "ExtractActiveData", "segments"),
-        os.path.join(log_dir, "ExtractActiveData")
+        os.path.join(log_dir, extract_folder, "segments"),
+        os.path.join(log_dir, extract_folder)
     ]
     
     dataloader_dir = None

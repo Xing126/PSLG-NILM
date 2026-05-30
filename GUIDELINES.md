@@ -10,8 +10,10 @@
 
 - **`input/`**: 原始输入数据。支持 `.npy`, `.txt`, `.csv` 格式。所有工作流的数据源头。
 - **`log/`**: 存储执行过程中的**缓存文件**、**日志**和**中间生成内容**。
-  - 格式：`log/{sequence_id}/{step_name}/`。
+  - 格式：`log/{sequence_id}/{step_name}_{suffix}/`。
   - `sequence_id` 为工作流启动时生成的唯一时间戳标识符。
+  - `step_name` 为步骤名称（如 `TimeSegmentation`）。
+  - `suffix` 为模型或方法后缀（如 `clasp`, `detsec`），用于区分不同配置下的运行记录。
   - 每个 Step 应将中间产物存储在自己的子文件夹中以便追踪。
 - **`output/`**: 存放**最终输出结果**。
   - 格式：`output/{sequence_id}/`。
@@ -42,7 +44,9 @@
   - **工具类支持**: `src/utlis/` 中的脚本在运行时应遵循以下逻辑：
     - **优先级 1**: 读取命令行提供的第一个参数作为 `Run ID` 或目录路径。
     - **优先级 2**: 若无命令行参数，自动读取 `config/config.yaml` 中的 `appliance_name` 和 `sequence_id` 并组合为 `{appliance_name}_{sequence_id}` 作为默认 `Run ID`。
-    - **路径自动关联**: 根据解析出的 `Run ID` 自动定位 `log/{run_id}/` 或 `output/{run_id}/`，实现一键式可视化分析。
+    - **路径自动关联**: 
+      - 根据解析出的 `Run ID` 自动定位 `log/{run_id}/` 或 `output/{run_id}/`。
+      - **模型/方法感知**: 脚本应读取 `config/config.yaml` 中对应步骤的 `method` 或 `model_name`（如 `segment_method`, `cluster_method`），以定位正确的带后缀子目录（如 `TimeSegmentation_{suffix}`），实现一键式可视化分析。
 
 ---
 
@@ -84,20 +88,21 @@
 
 为支持中断后继续执行，每个 Step 在执行完成后会在自己的缓存目录写入完成标记文件：
 
-- `log/{sequence_id}/{step_name}/.done`
+- `log/{sequence_id}/{step_name}_{suffix}/.done`
 
-当启用恢复模式时，工作流会跳过已存在 `.done` 的步骤，并从已完成步骤的下一个步骤继续执行。
+当启用恢复模式（`resume: true`）时，系统遵循以下逻辑：
 
-- 方式 1（推荐，命令行）：用同一个 sequence_id 恢复
-  - `python main.py --resume --sequence-id <原sequence_id>`
-- 方式 2（YAML）：在 `workflow` 下配置 `resume: true` 和 `sequence_id: ...`，`main.py` 会读取并恢复执行
-- 想强制重跑某一步：删除该 step 目录下的 `.done` 文件即可（例如 `log/<id>/FeatureExtract/.done`）
+1. **配置感知**: 工作流会检查当前配置下的 `{step_name}_{suffix}` 目录是否存在 `.done` 文件。
+2. **自动重跑**: 若当前配置的方法/模型（如 `clasp`）没有执行记录，但存在其他模型（如 `fluss`）的记录，系统仍会**重新执行**当前配置的步骤。
+3. **一致性保证 (级联触发)**: 一旦某个上游步骤因为配置变更或缺失记录而**实际执行**（未被跳过），为了确保数据一致性，工作流将**强制重跑该步骤之后的所有已启用步骤**，即使后续步骤存在旧的 `.done` 文件。
+4. **手动干预**: 想强制重跑某一步：删除该 step 目录下的 `.done` 文件即可（例如 `log/<id>/FeatureExtract_detsec/.done`）。
 
 ### 4.2 模型选择与配置规范
 
 为确保模型切换功能正常工作，必须遵循以下配置与代码的一致性原则：
 
-- **名称一致性**: `config.yaml` 中的 `model_name` 取值必须与 `src/steps/feature_extract_step.py` 中 `run()` 方法内部的条件分支判断字符串完全一致。
+- **名称一致性**: `config.yaml` 中的 `model_name` 或 `segment_method` 取值必须与 `src/steps/` 中对应 Step 类内部的逻辑一致。该名称将作为日志子目录的 `suffix`。
+- **目录隔离**: 不同模型的运行记录将存储在不同的文件夹中（如 `TimeSegmentation_clasp` 与 `TimeSegmentation_fluss`），互不覆盖，支持对比实验。
 - **配置同步**: 在 `config.yaml` 中修改 `model_name` 时，应确保 `steps.feature_extract` 下的参数（如 `latent_dim`, `epochs` 等）与该模型的需求相匹配。
 - **默认值保护**: 在 `main.py` 中读取配置时，应为 `model_name` 提供合理的默认值（如 `bilstm_ae`），以防止配置文件缺失该字段时导致程序崩溃。
 
