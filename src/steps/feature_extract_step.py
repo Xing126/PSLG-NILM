@@ -3,12 +3,15 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+import tensorflow as tf
 from src.framework.step import Step
 from models.feature_extract.cnn_ae import cnn_ae
 from models.feature_extract.lstm_ae import lstm_ae
 from models.feature_extract.bilstm_ae import bilstm_ae
 from models.feature_extract.bilstm_ae_attention import bilstm_ae_attention
 from models.feature_extract.detsec_model import detsec_ae
+from models.feature_extract.autoencoder import autoencoder
+from models.feature_extract.dtw import dtw_feature_extract
 
 
 class FeatureExtractStep(Step):
@@ -292,6 +295,14 @@ class FeatureExtractStep(Step):
             elif self.model_name == "detsec":
                 print(f"[FeatureExtract] Using DETSEC Model")
                 extracted_features, training_history = detsec_ae(np_data, model_config)
+
+            elif self.model_name == "autoencoder":
+                print(f"[FeatureExtract] Using Standard AutoEncoder")
+                extracted_features, training_history = autoencoder(np_data, model_config)
+
+            elif self.model_name == "dtw":
+                print(f"[FeatureExtract] Using DTW distance as features")
+                extracted_features, training_history = dtw_feature_extract(np_data, model_config)
 
             else:
                 print(f"[FeatureExtract] Unknown model: {self.model_name}")

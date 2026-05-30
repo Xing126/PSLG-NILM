@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH -J PSLG-NILM
-#SBATCH -p RTX3090
+#SBATCH -J PSLG-NILM-FLUSS
+#SBATCH -p A6000
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
 #SBATCH --mem=32G
@@ -9,7 +9,8 @@
 #SBATCH -e /home/scnu2023024258/data/code/PSLG-NILM/slurm_log/job-%x-%j.err
 #SBATCH --time=24:00:00
 
-CONFIG_PATH=${1:-config/config.yaml}
+# 默认使用 fluss 专用配置文件
+CONFIG_PATH=${1:-config/config_fluss.yaml}
 
 # --- 1. 作业开始，打印基本信息 ---
 echo "Job started on: $(date)"
@@ -35,17 +36,28 @@ source $(conda info --base)/bin/activate
 conda activate PSLG-NILM
 echo "Conda environment activated: $CONDA_DEFAULT_ENV"
 
-# --- 5. 执行数据预处理与训练脚本 ---
-echo "Starting main.py..."
+# --- 5. 针对 FLUSS 段错误的优化设置 ---
+# FLUSS 依赖 stumpy/numba，多线程并行有时会导致段错误
+# 限制线程数为 1 可以显著提高鲁棒性，虽然会降低单文件处理速度
+echo "Applying thread limits to prevent Segmentation Fault in FLUSS..."
+export NUMBA_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+# --- 6. 执行脚本 ---
+echo "Starting main.py with FLUSS configuration..."
 cd /home/scnu2023024258/data/code/PSLG-NILM
 
 python main.py --config "$CONFIG_PATH"
 
 if [ $? -eq 0 ]; then
-    echo "Workflow executed successfully!"
+    echo "FLUSS Workflow executed successfully!"
 else
-    echo "Workflow execution failed!"
+    echo "FLUSS Workflow execution failed!"
 fi
 
-# --- 6. 作业结束 ---
+# --- 7. 作业结束 ---
 echo "Job finished on: $(date)"

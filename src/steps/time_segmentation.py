@@ -85,13 +85,12 @@ class TimeSegmentationStep(Step):
                 print(f"[TimeSegmentation] FLUSS error: {e}")
                 return []
         elif self.segment_method == "espresso":
-            from espresso import espresso_minimize
+            from models.time_segmentation.espresso import EspressoModel
             try:
-                # ESPRESSO is a logic minimizer, its integration here is experimental
-                # and currently returns empty change points as a placeholder.
-                print(f"[TimeSegmentation] ESPRESSO logic minimizer called (Experimental)")
-                # Placeholder: ESPRESSO doesn't directly provide change points for time series
-                return []
+                # Use the new EspressoModel which integrates TSSB's ESPRESSO
+                model = EspressoModel(config={"window_size": self.window_size})
+                change_points = model.train(time_series)
+                return change_points
             except Exception as e:
                 print(f"[TimeSegmentation] ESPRESSO error: {e}")
                 return []

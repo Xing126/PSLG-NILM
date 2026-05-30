@@ -33,7 +33,7 @@ steps:
     enabled: true
     data_path: ""
     seq_len_path: ""
-    model_name: "detsec"  # lstm_ae / bilstm_ae / bilstm_ae_attention / detsec / autoencoder / dtw
+    model_name: "bilstm_ae"  # lstm_ae / bilstm_ae / bilstm_ae_attention / detsec
     latent_dim: 64
     epochs: 50
     batch_size: 32
