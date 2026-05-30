@@ -120,6 +120,14 @@ class ExtractActiveDataStep(Step):
             df.to_csv(filepath, index=False)
             output_files.append(filepath)
             
+            # Intermediate saving mechanism (log message for already saved files)
+            if self.should_save_intermediate(idx + 1, context):
+                print(f"[{self.name}] Intermediate progress: {idx + 1} segments processed and saved.")
+                # Save current progress list
+                checkpoint_path = os.path.join(log_dir, f'segments_checkpoint_{idx+1}.json')
+                with open(checkpoint_path, 'w', encoding='utf-8') as f:
+                    json.dump(output_files, f, indent=4)
+
             if (idx + 1) % 50 == 0:
                 print(f"  已保存 {idx + 1}/{len(work_intervals)} 个区间")
 

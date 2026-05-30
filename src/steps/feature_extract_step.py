@@ -323,6 +323,10 @@ class FeatureExtractStep(Step):
                 np.save(feature_file_path, extracted_features)
                 print(f"[FeatureExtract] Features saved to: {feature_file_path}")
 
+            # Intermediate saving mechanism (standard check)
+            if self.should_save_intermediate(1, context):
+                print(f"[FeatureExtract] Intermediate save triggered (step completed).")
+
         except Exception as e:
             print(f"[FeatureExtract] Error during feature extraction: {e}")
             import traceback

@@ -11,6 +11,7 @@ class Step(ABC):
         self.name = name
         self.suffix = suffix
         self.appliance_name = ""  # Default empty, can be set by subclasses
+        self.save_interval = 0
 
     @abstractmethod
     def run(self, context: dict) -> dict:
@@ -24,6 +25,15 @@ class Step(ABC):
             dict: Updated context.
         """
         pass
+
+    def should_save_intermediate(self, count: int, context: dict) -> bool:
+        """
+        Check if intermediate results should be saved based on the count and context['save_interval'].
+        """
+        interval = context.get('save_interval', 0)
+        if interval > 0 and count > 0 and count % interval == 0:
+            return True
+        return False
 
     def restore(self, context: dict) -> dict:
         return context

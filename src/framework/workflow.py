@@ -10,17 +10,19 @@ class Workflow:
     """
     Manages the sequential execution of ML workflow steps.
     """
-    def __init__(self, name: str, appliance_name: str = "", sequence_id: str | None = None, resume: bool = False):
+    def __init__(self, name: str, appliance_name: str = "", sequence_id: str | None = None, resume: bool = False, save_interval: int = 0):
         self.name = name
         self.appliance_name = str(appliance_name).strip()
         self.steps: List[Step] = []
         self.sequence_id = sequence_id or self._generate_sequence_id()
         self.resume = bool(resume)
+        self.save_interval = int(save_interval)
         run_id = self._build_run_id()
         self.context = {
             'sequence_id': self.sequence_id,
             'appliance_name': self.appliance_name,
             'run_id': run_id,
+            'save_interval': self.save_interval,
             'input_root': 'input',
             'log_root': os.path.join('log', run_id),
             'output_root': os.path.join('output', run_id),

@@ -49,7 +49,7 @@ class PrimitiveActivityMappingStep(Step):
 			"or provide context['activity_sequence_dir']."
 		)
 
-	def _collect_activity_ranges(self, activity_dir: str) -> List[Dict[str, Any]]:
+	def _collect_activity_ranges(self, activity_dir: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
 		activity_path = Path(activity_dir)
 		if not activity_path.exists():
 			raise FileNotFoundError(f"[PrimitiveActivityMapping] Activity directory not found: {activity_dir}")
@@ -85,6 +85,13 @@ class PrimitiveActivityMappingStep(Step):
 					'col_count': int(df.shape[1]),
 				}
 			)
+
+			# Intermediate saving mechanism
+			if self.should_save_intermediate(len(records), context):
+				print(f"[PrimitiveActivityMapping] Intermediate progress (activity) at {len(records)} files...")
+				checkpoint_path = os.path.join(self.get_log_dir(context), f'activity_records_checkpoint_{len(records)}.json')
+				with open(checkpoint_path, 'w', encoding='utf-8') as f:
+					json.dump(records, f, indent=4)
 
 		return records
 
@@ -182,7 +189,7 @@ class PrimitiveActivityMappingStep(Step):
 
 		return records
 
-	def _collect_primitive_ranges(self, primitive_dir: str) -> List[Dict[str, Any]]:
+	def _collect_primitive_ranges(self, primitive_dir: str, context: Dict[str, Any]) -> List[Dict[str, Any]]:
 		primitive_path = Path(primitive_dir)
 		if not primitive_path.exists():
 			raise FileNotFoundError(f"[PrimitiveActivityMapping] Primitive directory not found: {primitive_dir}")
@@ -210,7 +217,7 @@ class PrimitiveActivityMappingStep(Step):
 		records: List[Dict[str, Any]] = []
 		npy_files = sorted(primitive_path.glob('*.npy'))
 
-		for npy_file in npy_files:
+		for npy_idx, npy_file in enumerate(npy_files):
 			# Skip metadata files
 			if npy_file.name in ("indices.npy", "lengths.npy"):
 				continue
@@ -234,6 +241,13 @@ class PrimitiveActivityMappingStep(Step):
 				continue
 
 			records.extend(file_records)
+
+			# Intermediate saving mechanism
+			if self.should_save_intermediate(npy_idx + 1, context):
+				print(f"[PrimitiveActivityMapping] Intermediate progress (primitive) at {npy_idx + 1} files...")
+				checkpoint_path = os.path.join(self.get_log_dir(context), f'primitive_records_checkpoint_{npy_idx + 1}.json')
+				with open(checkpoint_path, 'w', encoding='utf-8') as f:
+					json.dump(records, f, indent=4)
 
 		for i, rec in enumerate(records):
 			rec['primitive_global_index'] = int(i)
@@ -519,11 +533,11 @@ class PrimitiveActivityMappingStep(Step):
 		os.makedirs(log_dir, exist_ok=True)
 
 		activity_dir = self._resolve_activity_dir(context)
-		activity_records = self._collect_activity_ranges(activity_dir)
+		activity_records = self._collect_activity_ranges(activity_dir, context)
 		activity_df = pd.DataFrame(activity_records)
 
 		primitive_dir = self._resolve_primitive_dir(context)
-		primitive_records = self._collect_primitive_ranges(primitive_dir)
+		primitive_records = self._collect_primitive_ranges(primitive_dir, context)
 		primitive_df = pd.DataFrame(primitive_records)
 
 		match_records = self._match_primitive_to_activity(primitive_records, activity_records)

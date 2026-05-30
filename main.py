@@ -1,7 +1,16 @@
-import yaml
 import os
-import argparse
 import sys
+
+# Set threading and environment variables before any other imports
+# to prevent segmentation faults caused by library conflicts (e.g., stumpy/numba and tensorflow)
+os.environ['NUMBA_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Prevent TensorFlow from pre-allocating all GPU memory
+
+import yaml
+import argparse
 import numpy as np
 
 # Add project root and models to sys.path
@@ -19,15 +28,6 @@ if time_seg_dir not in sys.path:
 if feature_ext_dir not in sys.path:
     sys.path.insert(0, feature_ext_dir)
 
-from src.framework.workflow import Workflow
-from src.steps.extract_active_data_step import ExtractActiveDataStep
-from src.steps.time_segmentation import TimeSegmentationStep
-from src.steps.feature_extract_step import FeatureExtractStep
-from src.steps.time_clustering_step import TimeClusteringStep
-from src.steps.primitive_activity_mapping_step import PrimitiveActivityMappingStep
-from src.steps.dataset_split_step import DatasetSplitStep
-
-
 def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None = None):
     """
     Main function to run the workflow based on config file.
@@ -36,20 +36,26 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
+    # Lazy import Workflow
+    from src.framework.workflow import Workflow
+
     # Initialize workflow with name from config
     workflow_name = config['workflow'].get('name', 'ML_Workflow')
     appliance_name = config['workflow'].get('appliance_name', '')
     resume_cfg = bool(config.get('workflow', {}).get('resume', False))
     sequence_id_cfg = config.get('workflow', {}).get('sequence_id', None)
+    save_interval_cfg = config.get('workflow', {}).get('save_interval', 0)
     wf = Workflow(
         workflow_name,
         appliance_name=appliance_name,
         sequence_id=sequence_id or sequence_id_cfg,
         resume=resume or resume_cfg,
+        save_interval=save_interval_cfg
     )
 
     extract_active_cfg = config["steps"].get("extract_active_data", {})
     if extract_active_cfg.get("enabled", False):
+        from src.steps.extract_active_data_step import ExtractActiveDataStep
         # 提取核心参数，其余通过 **kwargs 传递给模型
         step_params = extract_active_cfg.copy()
         step_params.pop("enabled", None)
@@ -68,6 +74,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
     
     time_segmentation_cfg = config["steps"].get("time_segmentation", {})
     if time_segmentation_cfg.get("enabled", False):
+        from src.steps.time_segmentation import TimeSegmentationStep
         wf.add_step(
             TimeSegmentationStep(
                 name="TimeSegmentation",
@@ -80,6 +87,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         )
     
     if config['steps'].get('feature_extract', {}).get('enabled', True):
+        from src.steps.feature_extract_step import FeatureExtractStep
         extract_config = config['steps']['feature_extract']
         wf.add_step(FeatureExtractStep(
             name="FeatureExtract",
@@ -96,6 +104,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         ))
     
     if config['steps'].get('time_clustering', {}).get('enabled', True):
+        from src.steps.time_clustering_step import TimeClusteringStep
         cluster_config = config['steps']['time_clustering']
         cluster_method = str(cluster_config.get('cluster_method', 'dbscan')).lower()
         method_specific = cluster_config.get('method_specific', {}) or {}
@@ -194,6 +203,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         ))
 
     if config['steps'].get('primitive_activity_mapping', {}).get('enabled', False):
+        from src.steps.primitive_activity_mapping_step import PrimitiveActivityMappingStep
         mapping_config = config['steps']['primitive_activity_mapping']
         wf.add_step(PrimitiveActivityMappingStep(
             name="PrimitiveActivityMapping",
@@ -205,6 +215,7 @@ def run_workflow(config_path: str, resume: bool = False, sequence_id: str | None
         ))
 
     if config['steps'].get('dataset_split', {}).get('enabled', False):
+        from src.steps.dataset_split_step import DatasetSplitStep
         split_config = config['steps']['dataset_split']
         wf.add_step(DatasetSplitStep(
             name="DatasetSplit",

@@ -43,6 +43,15 @@ class TimeSegmentationStep(Step):
 
     def get_segmentation_points(self, time_series, distance="znormed_euclidean_distance"):
         """Segmentation logic using BinaryClaSPSegmentation or FLUSS."""
+        # Pre-check for invalid data to prevent segfaults in stumpy/numba
+        if time_series is None or len(time_series) == 0:
+            print("[TimeSegmentation] Empty signal, skipping.")
+            return []
+        
+        if np.any(np.isnan(time_series)) or np.any(np.isinf(time_series)):
+            print("[TimeSegmentation] Signal contains NaNs or Infs, cleaning before processing.")
+            time_series = np.nan_to_num(time_series, nan=0.0, posinf=0.0, neginf=0.0)
+
         if self.segment_method == "fluss":
             # Set threading limits before importing fluss/stumpy/numba
             import os
@@ -251,6 +260,17 @@ class TimeSegmentationStep(Step):
                 all_samples.append(sample)
                 all_lengths.append(len(sample))
                 all_indices.append([i, start])
+
+            # Intermediate saving mechanism
+            if self.should_save_intermediate(i + 1, context):
+                print(f"[TimeSegmentation] Intermediate save at file {i+1}...")
+                temp_x = np.zeros((len(all_samples), max(all_lengths), 4), dtype=np.float32)
+                for idx, s in enumerate(all_samples):
+                    temp_x[idx, :len(s), :] = s
+                np.save(os.path.join(log_dir, f'X_checkpoint_{i+1}.npy'), temp_x)
+                np.save(os.path.join(log_dir, f'lengths_checkpoint_{i+1}.npy'), np.array(all_lengths))
+                np.save(os.path.join(log_dir, f'indices_checkpoint_{i+1}.npy'), np.array(all_indices))
+                del temp_x
 
             del df, signal, signal_cleaned, res
             gc.collect()

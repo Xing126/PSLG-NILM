@@ -385,6 +385,10 @@ class DatasetSplitStep(Step):
             output_paths[name] = paths_ds
             composition[name] = summary
 
+            # Intermediate saving mechanism
+            if self.should_save_intermediate(len(output_paths), context):
+                print(f"[DatasetSplit] Intermediate progress: {len(output_paths)} datasets split and saved.")
+
         global_summary = {
             'input_paths': paths,
             'raw_branch_shape': list(raw_branch.shape),

@@ -142,33 +142,22 @@ def find_boundaries(window_size, ac, cac, n_regimes, excl_zone):
 #     return ts, segments
 
 def fluss(ts, window_size, n_regimes=3, excl_factor=1, visualize=False):
-    # Ensure input is float64, contiguous, and handle NaN/Inf for stumpy/numba stability
-    ts = np.ascontiguousarray(np.asarray(ts).astype(np.float64))
-    if np.any(np.isnan(ts)) or np.any(np.isinf(ts)):
-        # Simple linear interpolation for NaNs/Infs if any (defensive)
-        mask = np.isfinite(ts)
-        if not np.all(mask):
-            ts = np.interp(np.arange(len(ts)), np.where(mask)[0], ts[mask])
+    # Ensure input is float64 for stumpy
+    ts = np.asarray(ts, dtype=np.float64)
 
     # 2. 计算 Matrix Profile
     # stumpy.stump 返回一个矩阵，第一列是距离(MP)，第二列是索引(MPI)
-    # Using numba might cause segfaults in some environments, ensuring it's not parallelized
-    import os
-    os.environ['NUMBA_NUM_THREADS'] = '1'
-    
     try:
         mp_res = stumpy.stump(ts, window_size)
-        # Check if we got any valid matches
         if np.all(np.isinf(mp_res[:, 0])):
-            print("[FLUSS] No valid matches found in Matrix Profile (signal might be too short or too repetitive)")
+            print("[FLUSS] No valid matches found in Matrix Profile")
             return ts, []
     except Exception as e:
         print(f"[FLUSS] stumpy.stump error: {e}")
         return ts, []
     
     # 提取 Matrix Profile Index (MPI)，这是 FLUSS 的输入
-    # 确保 MPI 是 int64 类型，某些 stumpy 版本需要
-    mpi = mp_res[:, 1].astype(np.int64)
+    mpi = mp_res[:, 1]
     mp = mp_res[:, 0]
 
     # 3. 计算 FLUSS

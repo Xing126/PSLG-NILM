@@ -1046,6 +1046,10 @@ class TimeClusteringStep(Step):
 
         self.save_clustering_results(data_np, seq_len, labels, save_dir)
 
+        # Intermediate saving mechanism (standard check)
+        if self.should_save_intermediate(1, context):
+            print(f"[TimeClustering] Intermediate save triggered (step completed).")
+
         context['cluster_labels'] = labels
         context['cluster_save_dir'] = save_dir
         context['n_clusters'] = len(set(labels)) - (1 if -1 in labels else 0)

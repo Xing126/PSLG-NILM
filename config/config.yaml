@@ -7,6 +7,7 @@ workflow:
   appliance_name: "kettle" 
   resume: true #设置为true有done会跳过已执行的step
   sequence_id: "20260530_114438"
+  save_interval: 10000 # 每处理n个文件保存一次log，不设置或为0则默认为无穷（即step处理完后才保存）
 
 # Step-specific configurations
 steps:
@@ -22,7 +23,7 @@ steps:
 
   time_segmentation: # 原 wavelet_separation
     enabled: true
-    segment_method: "fluss" # clasp / fluss / espresso
+    segment_method: "espresso" # clasp / fluss / espresso
     # fluss specific params
     window_size: 25
     n_regimes: 3
