@@ -514,96 +514,7 @@ class TimeClusteringStep(Step):
             scan_records,
             best_k,
             save_dir,
-            data_path=self.data_path,
-            feature_path=self.feature_path,
-            appliance_name=self.appliance_name,
-        )
-        return best_labels, best_k, scan_records, scan_payload
-
-    def run_kmeans_scan_dtw(self, ts_list: list, eval_feature_matrix: np.ndarray, save_dir: str) -> tuple:
-        """Scan direct TimeSeriesKMeans(metric=dtw) in [min_cluster, max_cluster]."""
-        from tslearn.clustering import TimeSeriesKMeans
-        from tslearn.utils import to_time_series_dataset
-
-        min_k = int(self.min_cluster)
-        max_k = int(self.max_cluster)
-        n_samples = int(len(ts_list))
-
-        if min_k < 2:
-            raise ValueError(f"[TimeClustering] min_cluster must be >= 2, got {min_k}")
-        if max_k < min_k:
-            raise ValueError(f"[TimeClustering] max_cluster must be >= min_cluster, got {max_k} < {min_k}")
-        if min_k >= n_samples:
-            raise ValueError(
-                f"[TimeClustering] min_cluster={min_k} is invalid for n_samples={n_samples}. "
-                "min_cluster must be less than number of samples."
-            )
-
-        # Auto mini-batch fallback for large datasets to keep DTW scan tractable.
-        max_scan_samples = 1000
-        if n_samples > max_scan_samples:
-            rng = np.random.default_rng(int(self.kmeans_random_state))
-            sample_idx = np.sort(rng.choice(n_samples, size=max_scan_samples, replace=False))
-            ts_list = [ts_list[i] for i in sample_idx]
-            eval_feature_matrix = eval_feature_matrix[sample_idx]
-            n_samples = max_scan_samples
-            print(
-                "[TimeClustering] DTW scan mini-batch enabled: "
-                f"sampling {n_samples} sequences from original dataset."
-            )
-
-        scan_records = []
-        best_score = -np.inf
-        best_k = None
-        best_labels = None
-        print(f"[TimeClustering] Running DTW TimeSeriesKMeans scan from k={min_k} to k={max_k}")
-
-        X = to_time_series_dataset(ts_list)
-
-        for k in range(min_k, max_k + 1):
-            if k >= n_samples:
-                print(f"[TimeClustering] Skip k={k}: requires k < n_samples ({n_samples})")
-                continue
-
-            kmeans_model = TimeSeriesKMeans(
-                n_clusters=k,
-                metric='dtw',
-                random_state=self.kmeans_random_state,
-                n_init=self.kmeans_n_init,
-                max_iter=self.kmeans_max_iter,
-            )
-            labels = kmeans_model.fit_predict(X)
-
-            sci = float(silhouette_score(eval_feature_matrix, labels, metric='euclidean'))
-            dbi = float(davies_bouldin_score(eval_feature_matrix, labels))
-            chi = float(calinski_harabasz_score(eval_feature_matrix, labels))
-
-            record = {
-                'n_clusters': int(k),
-                'sci': sci,
-                'dbi': dbi,
-                'chi': chi,
-                'dbcv': None,
-            }
-            scan_records.append(record)
-
-            print(
-                f"[TimeClustering] k={k} -> "
-                f"SCI={record['sci']:.6f}, DBI={record['dbi']:.6f}, CHI={record['chi']:.6f}, DBCV=None"
-            )
-
-            if sci > best_score:
-                best_score = sci
-                best_k = int(k)
-                best_labels = labels
-
-        if best_labels is None:
-            raise ValueError("[TimeClustering] DTW KMeans scan failed: no valid k in scan range.")
-
-        scan_payload = clustering_utils.save_kmeans_scan_artifacts(
-            scan_records,
-            best_k,
-            save_dir,
+            figure_dir=None,
             data_path=self.data_path,
             feature_path=self.feature_path,
             appliance_name=self.appliance_name,
@@ -690,6 +601,7 @@ class TimeClusteringStep(Step):
             scan_records,
             best_eps,
             save_dir,
+            figure_dir=None,
             data_path=self.data_path,
             feature_path=self.feature_path,
             appliance_name=self.appliance_name,
@@ -698,7 +610,7 @@ class TimeClusteringStep(Step):
 
     def evaluate_clustering(self, labels: np.ndarray, dist_matrix: np.ndarray,
                            org_data: np.ndarray, feature_matrix: np.ndarray,
-                           seq_len: np.ndarray, save_dir: str,
+                           seq_len: np.ndarray, metrics_dir: str,
                            enable_visualization: bool = False) -> dict:
         """Thin wrapper: forward to clustering_utils and assemble a lightweight metrics dict."""
         metrics = {}
@@ -764,14 +676,15 @@ class TimeClusteringStep(Step):
                 dist_matrix=dist_matrix,
                 org_data=org_data,
                 feature_matrix=feature_matrix,
-                save_dir=save_dir,
+                save_dir=metrics_dir,
+                figure_dir=None, # Moved to standalone script
                 seq_length=seq_len,
                 dist_method=quant_dist_method,
                 cluster_method=self.cluster_method,
                 cluster_hyperparams=clustering_hyperparams,
                 language=self.visualization_language,
                 col_index=self.col_index,
-                visualize=enable_visualization,
+                visualize=False, # Moved to standalone script
                 visualize_noise=self.visualize_noise,
                 cluster_stack_count=self.cluster_stack_count,
                 sampling_threshold=200,
@@ -865,6 +778,10 @@ class TimeClusteringStep(Step):
         save_dir = log_dir
         os.makedirs(save_dir, exist_ok=True)
 
+        output_root = context.get('output_root', os.path.join('output', 'default'))
+        metrics_dir = os.path.join(output_root, 'output')
+        os.makedirs(metrics_dir, exist_ok=True)
+
         print(f"[TimeClustering] Starting clustering workflow")
         print(
             f"[TimeClustering] Parameters: method={self.cluster_method}, "
@@ -894,7 +811,12 @@ class TimeClusteringStep(Step):
         # Validate visualization/index selection early to fail fast with clear diagnostics.
         self._validate_col_index(data_np)
 
-        use_dtw_data = self.metric in ('dtw', 'fastdtw')
+        # For kmeans-scan, we always use features with euclidean distance as per latest requirements.
+        if self.cluster_method in ('kmeans-scan', 'kmeans_scan'):
+            use_dtw_data = False
+        else:
+            use_dtw_data = self.metric in ('dtw', 'fastdtw')
+            
         normalized_feature_list = None
         normalized_feature_matrix = None
         ts_list = None
@@ -1005,14 +927,10 @@ class TimeClusteringStep(Step):
                     cache_dir=save_dir
                 )
         elif self.cluster_method in ('kmeans-scan', 'kmeans_scan'):
-            if use_dtw_data:
-                _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan_dtw(
-                    ts_list,
-                    eval_feature_matrix,
-                    save_dir,
-                )
-            else:
-                _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan(normalized_feature_matrix, save_dir)
+            _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan(
+                normalized_feature_matrix, 
+                save_dir,
+            )
             self.kmeans_n_clusters = int(best_k)
 
             # In scan mode, only export scan artifacts (JSON + line chart),
@@ -1034,17 +952,44 @@ class TimeClusteringStep(Step):
                 "Supported methods: dbscan, dbscan-scan, kmeans, kmeans-scan, hdbscan"
             )
 
+        # Final evaluation (Metrics only, visualization moved to utils)
         quant_metrics = self.evaluate_clustering(
             labels,
             dist_matrix,
             data_np,
             eval_feature_matrix,
             seq_len,
-            save_dir,
-            enable_visualization=self.enable_visualization
+            metrics_dir=metrics_dir,
+            enable_visualization=False
         )
 
         self.save_clustering_results(data_np, seq_len, labels, save_dir)
+        
+        # Save additional data for standalone visualization script
+        np.save(os.path.join(save_dir, 'feature_matrix.npy'), eval_feature_matrix)
+        np.save(os.path.join(save_dir, 'org_data.npy'), data_np)
+        np.save(os.path.join(save_dir, 'seq_len.npy'), seq_len)
+        
+        # Save the three metrics (Silhouette, DB, CH) as requested
+        # Naming convention: {segment_method}_{feature_extract_model_name}.npy
+        segment_method = context.get('segment_method', 'unknown_seg')
+        
+        # Get feature model name from config or context
+        feature_model_name = 'unknown_feat'
+        if 'feature_extract_config' in context:
+            feature_model_name = context['feature_extract_config'].get('model_name', 'unknown_feat')
+        
+        metrics_file_name = f"{segment_method}_{feature_model_name}.npy"
+        
+        # metrics_array: [sil_score, db_score, ch_score]
+        metrics_array = np.array([
+            quant_metrics.get('silhouette_score', 0.0),
+            quant_metrics.get('davies_bouldin_score', 0.0),
+            quant_metrics.get('calinski_harabasz_score', 0.0)
+        ])
+        metrics_save_path = os.path.join(save_dir, metrics_file_name)
+        np.save(metrics_save_path, metrics_array)
+        print(f"[TimeClustering] Metrics saved to {metrics_save_path}")
 
         # Intermediate saving mechanism (standard check)
         if self.should_save_intermediate(1, context):
@@ -1065,6 +1010,13 @@ class TimeClusteringStep(Step):
                 if key in context['data']:
                     print(f"[TimeClustering] Releasing Step 2 (WaveletSeparation) context data: {key}")
                     del context['data'][key]
+
+        # Clean up local large objects
+        if 'dist_matrix' in locals(): del dist_matrix
+        if 'normalized_feature_matrix' in locals(): del normalized_feature_matrix
+        if 'ts_list' in locals(): del ts_list
+        if 'data_np' in locals(): del data_np
+        if 'feature_matrix' in locals(): del feature_matrix
 
         gc.collect()
         return context

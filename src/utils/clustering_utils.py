@@ -449,6 +449,7 @@ def save_kmeans_scan_artifacts(
 	scan_records: list,
 	best_k: int,
 	save_dir: str,
+	figure_dir: Optional[str] = None,
 	data_path: Optional[str] = None,
 	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
@@ -471,44 +472,46 @@ def save_kmeans_scan_artifacts(
 		json.dump(payload, f, ensure_ascii=False, indent=2)
 	print(f"[TimeClustering] KMeans scan metrics saved to {json_path}")
 
-	ks = [r['n_clusters'] for r in scan_records]
-	sci_vals = [r['sci'] for r in scan_records]
-	dbi_vals = [r['dbi'] for r in scan_records]
-	chi_vals = [r['chi'] for r in scan_records]
-	dbcv_vals = [np.nan if r.get('dbcv') is None else float(r['dbcv']) for r in scan_records]
+	if figure_dir:
+		ks = [r['n_clusters'] for r in scan_records]
+		sci_vals = [r['sci'] for r in scan_records]
+		dbi_vals = [r['dbi'] for r in scan_records]
+		chi_vals = [r['chi'] for r in scan_records]
+		dbcv_vals = [np.nan if r.get('dbcv') is None else float(r['dbcv']) for r in scan_records]
 
-	fig, axes = plt.subplots(4, 1, figsize=(10, 15), dpi=150)
-	fig.suptitle('KMeans Scan Metrics', fontsize=14, fontweight='bold')
+		fig, axes = plt.subplots(4, 1, figsize=(10, 15), dpi=150)
+		fig.suptitle('KMeans Scan Metrics', fontsize=14, fontweight='bold')
 
-	axes[0].plot(ks, sci_vals, marker='o', color='tab:blue')
-	axes[0].set_title('SCI (Silhouette) vs n_clusters')
-	axes[0].set_xlabel('n_clusters')
-	axes[0].set_ylabel('SCI (higher is better)')
-	axes[0].grid(alpha=0.3)
+		axes[0].plot(ks, sci_vals, marker='o', color='tab:blue')
+		axes[0].set_title('SCI (Silhouette) vs n_clusters')
+		axes[0].set_xlabel('n_clusters')
+		axes[0].set_ylabel('SCI (higher is better)')
+		axes[0].grid(alpha=0.3)
 
-	axes[1].plot(ks, dbi_vals, marker='o', color='tab:orange')
-	axes[1].set_title('DBI vs n_clusters')
-	axes[1].set_xlabel('n_clusters')
-	axes[1].set_ylabel('DBI (lower is better)')
-	axes[1].grid(alpha=0.3)
+		axes[1].plot(ks, dbi_vals, marker='o', color='tab:orange')
+		axes[1].set_title('DBI vs n_clusters')
+		axes[1].set_xlabel('n_clusters')
+		axes[1].set_ylabel('DBI (lower is better)')
+		axes[1].grid(alpha=0.3)
 
-	axes[2].plot(ks, chi_vals, marker='o', color='tab:green')
-	axes[2].set_title('CHI vs n_clusters')
-	axes[2].set_xlabel('n_clusters')
-	axes[2].set_ylabel('CHI (higher is better)')
-	axes[2].grid(alpha=0.3)
+		axes[2].plot(ks, chi_vals, marker='o', color='tab:green')
+		axes[2].set_title('CHI vs n_clusters')
+		axes[2].set_xlabel('n_clusters')
+		axes[2].set_ylabel('CHI (higher is better)')
+		axes[2].grid(alpha=0.3)
 
-	axes[3].plot(ks, dbcv_vals, marker='o', color='tab:red')
-	axes[3].set_title('DBCV vs n_clusters')
-	axes[3].set_xlabel('n_clusters')
-	axes[3].set_ylabel('DBCV (higher is better)')
-	axes[3].grid(alpha=0.3)
+		axes[3].plot(ks, dbcv_vals, marker='o', color='tab:red')
+		axes[3].set_title('DBCV vs n_clusters')
+		axes[3].set_xlabel('n_clusters')
+		axes[3].set_ylabel('DBCV (higher is better)')
+		axes[3].grid(alpha=0.3)
 
-	plt.tight_layout()
-	fig_path = os.path.join(save_dir, 'kmeans_scan_metrics.png')
-	plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-	plt.close(fig)
-	print(f"[TimeClustering] KMeans scan plot saved to {fig_path}")
+		plt.tight_layout()
+		os.makedirs(figure_dir, exist_ok=True)
+		fig_path = os.path.join(figure_dir, 'kmeans_scan_metrics.png')
+		plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+		plt.close(fig)
+		print(f"[TimeClustering] KMeans scan plot saved to {fig_path}")
 	return payload
 
 
@@ -516,6 +519,7 @@ def save_dbscan_scan_artifacts(
 	scan_records: list,
 	best_eps: float,
 	save_dir: str,
+	figure_dir: Optional[str] = None,
 	data_path: Optional[str] = None,
 	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
@@ -538,58 +542,60 @@ def save_dbscan_scan_artifacts(
 		json.dump(payload, f, ensure_ascii=False, indent=2)
 	print(f"[TimeClustering] DBSCAN scan metrics saved to {json_path}")
 
-	x_vals = [float(r['eps']) for r in scan_records]
-	sci_vals = [np.nan if r['sci'] is None else float(r['sci']) for r in scan_records]
-	dbi_vals = [np.nan if r['dbi'] is None else float(r['dbi']) for r in scan_records]
-	chi_vals = [np.nan if r['chi'] is None else float(r['chi']) for r in scan_records]
-	dbcv_vals = [np.nan if r.get('dbcv') is None else float(r['dbcv']) for r in scan_records]
-	n_noise_vals = [int(r['n_noise']) for r in scan_records]
-	n_cluster_vals = [int(r['n_clusters']) for r in scan_records]
+	if figure_dir:
+		x_vals = [float(r['eps']) for r in scan_records]
+		sci_vals = [np.nan if r['sci'] is None else float(r['sci']) for r in scan_records]
+		dbi_vals = [np.nan if r['dbi'] is None else float(r['dbi']) for r in scan_records]
+		chi_vals = [np.nan if r['chi'] is None else float(r['chi']) for r in scan_records]
+		dbcv_vals = [np.nan if r.get('dbcv') is None else float(r['dbcv']) for r in scan_records]
+		n_noise_vals = [int(r['n_noise']) for r in scan_records]
+		n_cluster_vals = [int(r['n_clusters']) for r in scan_records]
 
-	fig, axes = plt.subplots(6, 1, figsize=(10, 22), dpi=150)
-	fig.suptitle('DBSCAN Scan Metrics', fontsize=14, fontweight='bold')
+		fig, axes = plt.subplots(6, 1, figsize=(10, 22), dpi=150)
+		fig.suptitle('DBSCAN Scan Metrics', fontsize=14, fontweight='bold')
 
-	axes[0].plot(x_vals, sci_vals, marker='o', color='tab:blue')
-	axes[0].set_title('SCI (Silhouette) vs eps')
-	axes[0].set_xlabel('eps')
-	axes[0].set_ylabel('SCI (higher is better)')
-	axes[0].grid(alpha=0.3)
+		axes[0].plot(x_vals, sci_vals, marker='o', color='tab:blue')
+		axes[0].set_title('SCI (Silhouette) vs eps')
+		axes[0].set_xlabel('eps')
+		axes[0].set_ylabel('SCI (higher is better)')
+		axes[0].grid(alpha=0.3)
 
-	axes[1].plot(x_vals, dbi_vals, marker='o', color='tab:orange')
-	axes[1].set_title('DBI vs eps')
-	axes[1].set_xlabel('eps')
-	axes[1].set_ylabel('DBI (lower is better)')
-	axes[1].grid(alpha=0.3)
+		axes[1].plot(x_vals, dbi_vals, marker='o', color='tab:orange')
+		axes[1].set_title('DBI vs eps')
+		axes[1].set_xlabel('eps')
+		axes[1].set_ylabel('DBI (lower is better)')
+		axes[1].grid(alpha=0.3)
 
-	axes[2].plot(x_vals, chi_vals, marker='o', color='tab:green')
-	axes[2].set_title('CHI vs eps')
-	axes[2].set_xlabel('eps')
-	axes[2].set_ylabel('CHI (higher is better)')
-	axes[2].grid(alpha=0.3)
+		axes[2].plot(x_vals, chi_vals, marker='o', color='tab:green')
+		axes[2].set_title('CHI vs eps')
+		axes[2].set_xlabel('eps')
+		axes[2].set_ylabel('CHI (higher is better)')
+		axes[2].grid(alpha=0.3)
 
-	axes[3].plot(x_vals, n_noise_vals, marker='o', color='tab:red')
-	axes[3].set_title('n_noise vs eps')
-	axes[3].set_xlabel('eps')
-	axes[3].set_ylabel('n_noise')
-	axes[3].grid(alpha=0.3)
+		axes[3].plot(x_vals, n_noise_vals, marker='o', color='tab:red')
+		axes[3].set_title('n_noise vs eps')
+		axes[3].set_xlabel('eps')
+		axes[3].set_ylabel('n_noise')
+		axes[3].grid(alpha=0.3)
 
-	axes[4].plot(x_vals, n_cluster_vals, marker='o', color='tab:purple')
-	axes[4].set_title('n_clusters vs eps')
-	axes[4].set_xlabel('eps')
-	axes[4].set_ylabel('n_clusters')
-	axes[4].grid(alpha=0.3)
+		axes[4].plot(x_vals, n_cluster_vals, marker='o', color='tab:purple')
+		axes[4].set_title('n_clusters vs eps')
+		axes[4].set_xlabel('eps')
+		axes[4].set_ylabel('n_clusters')
+		axes[4].grid(alpha=0.3)
 
-	axes[5].plot(x_vals, dbcv_vals, marker='o', color='tab:brown')
-	axes[5].set_title('DBCV vs eps')
-	axes[5].set_xlabel('eps')
-	axes[5].set_ylabel('DBCV (higher is better)')
-	axes[5].grid(alpha=0.3)
+		axes[5].plot(x_vals, dbcv_vals, marker='o', color='tab:brown')
+		axes[5].set_title('DBCV vs eps')
+		axes[5].set_xlabel('eps')
+		axes[5].set_ylabel('DBCV (higher is better)')
+		axes[5].grid(alpha=0.3)
 
-	plt.tight_layout()
-	fig_path = os.path.join(save_dir, 'dbscan_scan_metrics.png')
-	plt.savefig(fig_path, dpi=300, bbox_inches='tight')
-	plt.close(fig)
-	print(f"[TimeClustering] DBSCAN scan plot saved to {fig_path}")
+		plt.tight_layout()
+		os.makedirs(figure_dir, exist_ok=True)
+		fig_path = os.path.join(figure_dir, 'dbscan_scan_metrics.png')
+		plt.savefig(fig_path, dpi=300, bbox_inches='tight')
+		plt.close(fig)
+		print(f"[TimeClustering] DBSCAN scan plot saved to {fig_path}")
 	return payload
 
 
@@ -789,6 +795,7 @@ def cluster_result_quantification(
 	org_data: np.ndarray,
 	feature_matrix: np.ndarray,
 	save_dir: Optional[str] = None,
+	figure_dir: Optional[str] = None,
 	seq_length: Optional[np.ndarray] = None,
 	dist_method: str = 'dtw',
 	cluster_method: str = 'unknown',
@@ -902,11 +909,12 @@ def cluster_result_quantification(
 		if seq_length is None:
 			seq_length = np.full((org_data.shape[0],), org_data.shape[1], dtype=np.int32)
 
+		effective_fig_dir = figure_dir if figure_dir else save_dir
 		cluster_result_pic_save(
 			data_array=org_data,
 			seq_length=seq_length,
 			cluster_result=cluster_labels,
-			save_dir=save_dir if save_dir else './',
+			save_dir=effective_fig_dir if effective_fig_dir else './',
 			threshold=sampling_threshold,
 			col_index=col_index,
 			language=language,
@@ -919,7 +927,7 @@ def cluster_result_quantification(
 			feature_matrix=feature_matrix,
 			org_data=org_data,
 			seq_length=seq_length,
-			save_dir=save_dir,
+			save_dir=effective_fig_dir,
 			dist_method=dist_method,
 			col_index=col_index,
 			sampling_threshold=sampling_threshold,

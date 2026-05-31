@@ -1,4 +1,4 @@
-﻿# TimeClustering Step 使用说明（精简版）
+# TimeClustering Step 使用说明（精简版）
 
 本文档仅说明当前代码已实现能力。
 
@@ -79,8 +79,9 @@ steps:
 - `random_state`
 - `n_init`
 - `max_iter`
+- `metric` (仅支持 `euclidean`)
 
-说明：扫描维度是 `n_clusters`，记录每个 k 的 `SCI/DBI/CHI`。
+说明：该模式强制对特征提取后的结果进行聚类扫描，使用特征向量间的欧式距离作为度量，不再支持直接的 DTW 序列扫描以提升计算效率。扫描维度是 `n_clusters`，记录每个 k 的 `SCI/DBI/CHI`。
 
 ### 3.5 hdbscan
 

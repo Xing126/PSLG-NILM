@@ -200,6 +200,7 @@ class TimeSegmentationStep(Step):
         context["data"]["X"] = X
         context["data"]["lengths"] = L
         context["data"]["indices"] = I
+        context["segment_method"] = self.segment_method
         return context
 
     def run(self, context: dict) -> dict:
@@ -330,6 +331,9 @@ class TimeSegmentationStep(Step):
             context['data']['X'] = X
             context['data']['lengths'] = L
             context['data']['indices'] = I
+            
+            # Store segmentation method for downstream steps
+            context['segment_method'] = self.segment_method
             
             print(f"Tensorization complete: {n_samples} samples, max_length={max_len}")
             print(f"Saved to {log_dir} and updated context['data']")
