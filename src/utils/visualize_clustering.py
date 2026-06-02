@@ -64,67 +64,78 @@ def main():
         print(f"Warning: Metrics file {metrics_file} not found in {cluster_dir}")
 
     # 4. Load Data for Visualization
+    data_loaded = False
     try:
         labels = np.load(os.path.join(cluster_dir, 'cluster_labels.npy'))
         feature_matrix = np.load(os.path.join(cluster_dir, 'feature_matrix.npy'))
         org_data = np.load(os.path.join(cluster_dir, 'org_data.npy'))
         seq_len = np.load(os.path.join(cluster_dir, 'seq_len.npy'))
+        data_loaded = True
     except FileNotFoundError as e:
-        print(f"Error: Missing required .npy files in {cluster_dir}: {e}")
-        return
+        print(f"[VisualizeClustering] Warning: Missing required .npy files in {cluster_dir}. "
+              "Detailed cluster visualization will be skipped.")
+        # Do not return, proceed to check for scan artifacts
 
     # 5. Perform Visualization
     figure_dir = os.path.join(output_root, 'figure')
     os.makedirs(figure_dir, exist_ok=True)
     
-    # Extract visualization params from config
-    viz_config = cluster_config.get('visualization_specific', {})
-    language = viz_config.get('language', 'en')
-    visualize_noise = viz_config.get('visualize_noise', True)
-    cluster_stack_count = viz_config.get('cluster_stack_count', 50)
-    col_index = cluster_config.get('col_index', 2)
-    
-    # Unified distance method logic (dtw if metric is dtw)
-    metric = cluster_config.get('method_specific', {}).get(cluster_method, {}).get('metric', 'euclidean')
-    dist_method = 'dtw' if metric in ('dtw', 'fastdtw') else 'euclidean'
+    if data_loaded:
+        # Extract visualization params from config
+        viz_config = cluster_config.get('visualization_specific', {})
+        language = viz_config.get('language', 'en')
+        visualize_noise = viz_config.get('visualize_noise', True)
+        cluster_stack_count = viz_config.get('cluster_stack_count', 50)
+        col_index = cluster_config.get('col_index', 2)
+        
+        # Unified distance method logic (dtw if metric is dtw)
+        metric = cluster_config.get('method_specific', {}).get(cluster_method, {}).get('metric', 'euclidean')
+        dist_method = 'dtw' if metric in ('dtw', 'fastdtw') else 'euclidean'
 
-    print(f"[VisualizeClustering] Generating plots in {figure_dir}...")
-    
-    # Call existing utils functions
-    clustering_utils.cluster_result_pic_save(
-        data_array=org_data,
-        seq_length=seq_len,
-        cluster_result=labels,
-        save_dir=figure_dir,
-        threshold=200,
-        col_index=col_index,
-        language=language
-    )
-    
-    valid_idx = labels != -1
-    valid_labels = labels[valid_idx]
-    valid_org_data = org_data[valid_idx]
-    valid_feature_matrix = feature_matrix[valid_idx]
-    
-    clustering_utils.visualize_cluster_results(
-        cluster_labels=labels,
-        valid_labels=valid_labels,
-        valid_org_data=valid_org_data,
-        feature_matrix=feature_matrix,
-        org_data=org_data,
-        seq_length=seq_len,
-        save_dir=figure_dir,
-        dist_method=dist_method,
-        col_index=col_index,
-        sampling_threshold=200,
-        cluster_stack_count=cluster_stack_count,
-        visualize_noise=visualize_noise,
-        language=language,
-        show=False
-    )
+        print(f"[VisualizeClustering] Generating plots in {figure_dir}...")
+        
+        # Call existing utils functions
+        clustering_utils.cluster_result_pic_save(
+            data_array=org_data,
+            seq_length=seq_len,
+            cluster_result=labels,
+            save_dir=figure_dir,
+            threshold=200,
+            col_index=col_index,
+            language=language
+        )
+        
+        valid_idx = labels != -1
+        valid_labels = labels[valid_idx]
+        valid_org_data = org_data[valid_idx]
+        valid_feature_matrix = feature_matrix[valid_idx]
+        
+        clustering_utils.visualize_cluster_results(
+            cluster_labels=labels,
+            valid_labels=valid_labels,
+            valid_org_data=valid_org_data,
+            feature_matrix=feature_matrix,
+            org_data=org_data,
+            seq_length=seq_len,
+            save_dir=figure_dir,
+            dist_method=dist_method,
+            col_index=col_index,
+            sampling_threshold=200,
+            cluster_stack_count=cluster_stack_count,
+            visualize_noise=visualize_noise,
+            language=language,
+            show=False,
+            cluster_method=cluster_method,
+            feature_model=feature_model,
+            segment_method=segment_method
+        )
+
+    else:
+        print(f"[VisualizeClustering] Skipping detailed visualization as data files are missing.")
     
     # 6. Optional: Generate scan plots if JSON exists
-    kmeans_scan_json = os.path.join(cluster_dir, 'kmeans_scan_metrics.json')
+    # Naming convention: {cluster_method}_{feature_model}_{segment_method}.json
+    kmeans_scan_json = os.path.join(cluster_dir, f'kmeans-scan_{feature_model}_{segment_method}.json')
     if os.path.exists(kmeans_scan_json):
         import json
         with open(kmeans_scan_json, 'r') as f:
@@ -133,10 +144,12 @@ def main():
             scan_payload['records'],
             scan_payload['best_n_clusters'],
             cluster_dir,
-            figure_dir=figure_dir
+            figure_dir=figure_dir,
+            feature_model=feature_model,
+            segment_method=segment_method
         )
     
-    dbscan_scan_json = os.path.join(cluster_dir, 'dbscan_scan_metrics.json')
+    dbscan_scan_json = os.path.join(cluster_dir, f'dbscan-scan_{feature_model}_{segment_method}.json')
     if os.path.exists(dbscan_scan_json):
         import json
         with open(dbscan_scan_json, 'r') as f:
@@ -145,8 +158,16 @@ def main():
             scan_payload['records'],
             scan_payload['best_eps'],
             cluster_dir,
-            figure_dir=figure_dir
+            figure_dir=figure_dir,
+            feature_model=feature_model,
+            segment_method=segment_method
         )
+    
+    # Also check for standard evaluation metrics JSON
+    eval_metrics_json = os.path.join(cluster_dir, f'{cluster_method}_{feature_model}_{segment_method}.json')
+    if os.path.exists(eval_metrics_json):
+        print(f"[VisualizeClustering] Found evaluation metrics: {eval_metrics_json}")
+
 
     print(f"[VisualizeClustering] Visualization complete. Results in {figure_dir}")
 

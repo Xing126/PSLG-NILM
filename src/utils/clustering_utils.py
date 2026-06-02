@@ -453,11 +453,15 @@ def save_kmeans_scan_artifacts(
 	data_path: Optional[str] = None,
 	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
+	feature_model: Optional[str] = None,
+	segment_method: Optional[str] = None,
 ):
 	"""Persist KMeans-scan metrics as JSON and line chart."""
 	os.makedirs(save_dir, exist_ok=True)
 	payload = {
 		'scan_method': 'kmeans-scan',
+		'feature_model': str(feature_model) if feature_model else 'unknown',
+		'segment_method': str(segment_method) if segment_method else 'unknown',
 		'best_n_clusters': int(best_k),
 		'selection_rule': 'max_sci',
 		'data_source': {
@@ -467,7 +471,11 @@ def save_kmeans_scan_artifacts(
 		},
 		'records': scan_records,
 	}
-	json_path = os.path.join(save_dir, 'kmeans_scan_metrics.json')
+	
+	# naming: {cluster_method}_{feature_model}_{segment_method}.json
+	json_filename = f"kmeans-scan_{payload['feature_model']}_{payload['segment_method']}.json"
+	json_path = os.path.join(save_dir, json_filename)
+	
 	with open(json_path, 'w', encoding='utf-8') as f:
 		json.dump(payload, f, ensure_ascii=False, indent=2)
 	print(f"[TimeClustering] KMeans scan metrics saved to {json_path}")
@@ -480,7 +488,7 @@ def save_kmeans_scan_artifacts(
 		dbcv_vals = [np.nan if r.get('dbcv') is None else float(r['dbcv']) for r in scan_records]
 
 		fig, axes = plt.subplots(4, 1, figsize=(10, 15), dpi=150)
-		fig.suptitle('KMeans Scan Metrics', fontsize=14, fontweight='bold')
+		fig.suptitle(f'KMeans Scan Metrics ({payload["feature_model"]}, {payload["segment_method"]})', fontsize=14, fontweight='bold')
 
 		axes[0].plot(ks, sci_vals, marker='o', color='tab:blue')
 		axes[0].set_title('SCI (Silhouette) vs n_clusters')
@@ -508,7 +516,8 @@ def save_kmeans_scan_artifacts(
 
 		plt.tight_layout()
 		os.makedirs(figure_dir, exist_ok=True)
-		fig_path = os.path.join(figure_dir, 'kmeans_scan_metrics.png')
+		fig_filename = f"kmeans-scan_{payload['feature_model']}_{payload['segment_method']}.png"
+		fig_path = os.path.join(figure_dir, fig_filename)
 		plt.savefig(fig_path, dpi=300, bbox_inches='tight')
 		plt.close(fig)
 		print(f"[TimeClustering] KMeans scan plot saved to {fig_path}")
@@ -523,11 +532,15 @@ def save_dbscan_scan_artifacts(
 	data_path: Optional[str] = None,
 	feature_path: Optional[str] = None,
 	appliance_name: Optional[str] = None,
+	feature_model: Optional[str] = None,
+	segment_method: Optional[str] = None,
 ):
 	"""Persist DBSCAN-scan metrics as JSON and line charts."""
 	os.makedirs(save_dir, exist_ok=True)
 	payload = {
 		'scan_method': 'dbscan-scan',
+		'feature_model': str(feature_model) if feature_model else 'unknown',
+		'segment_method': str(segment_method) if segment_method else 'unknown',
 		'best_eps': float(best_eps),
 		'selection_rule': 'max_sci',
 		'data_source': {
@@ -537,7 +550,11 @@ def save_dbscan_scan_artifacts(
 		},
 		'records': scan_records,
 	}
-	json_path = os.path.join(save_dir, 'dbscan_scan_metrics.json')
+	
+	# naming: {cluster_method}_{feature_model}_{segment_method}.json
+	json_filename = f"dbscan-scan_{payload['feature_model']}_{payload['segment_method']}.json"
+	json_path = os.path.join(save_dir, json_filename)
+	
 	with open(json_path, 'w', encoding='utf-8') as f:
 		json.dump(payload, f, ensure_ascii=False, indent=2)
 	print(f"[TimeClustering] DBSCAN scan metrics saved to {json_path}")
@@ -552,7 +569,7 @@ def save_dbscan_scan_artifacts(
 		n_cluster_vals = [int(r['n_clusters']) for r in scan_records]
 
 		fig, axes = plt.subplots(6, 1, figsize=(10, 22), dpi=150)
-		fig.suptitle('DBSCAN Scan Metrics', fontsize=14, fontweight='bold')
+		fig.suptitle(f'DBSCAN Scan Metrics ({payload["feature_model"]}, {payload["segment_method"]})', fontsize=14, fontweight='bold')
 
 		axes[0].plot(x_vals, sci_vals, marker='o', color='tab:blue')
 		axes[0].set_title('SCI (Silhouette) vs eps')
@@ -592,11 +609,13 @@ def save_dbscan_scan_artifacts(
 
 		plt.tight_layout()
 		os.makedirs(figure_dir, exist_ok=True)
-		fig_path = os.path.join(figure_dir, 'dbscan_scan_metrics.png')
+		fig_filename = f"dbscan-scan_{payload['feature_model']}_{payload['segment_method']}.png"
+		fig_path = os.path.join(figure_dir, fig_filename)
 		plt.savefig(fig_path, dpi=300, bbox_inches='tight')
 		plt.close(fig)
 		print(f"[TimeClustering] DBSCAN scan plot saved to {fig_path}")
 	return payload
+
 
 
 def visualize_cluster_results(
@@ -614,6 +633,9 @@ def visualize_cluster_results(
 	visualize_noise: bool = True,
 	language: str = 'zh',
 	show: bool = True,
+	cluster_method: str = 'unknown',
+	feature_model: str = 'unknown',
+	segment_method: str = 'unknown',
 ) -> None:
 	"""Render cluster center, stacked series, and tSNE visualizations."""
 	def _extract_series(sample: np.ndarray, eff_len: int, cidx: int) -> np.ndarray:
@@ -696,8 +718,12 @@ def visualize_cluster_results(
 			axes[i].grid(alpha=0.3, linestyle='--')
 
 	plt.tight_layout()
+	
+	# Naming convention: {cluster_method}_{feature_model}_{segment_method}_center.png
+	file_prefix = f"{str(cluster_method).lower()}_{str(feature_model).lower()}_{str(segment_method).lower()}"
+	
 	if save_dir:
-		plt.savefig(os.path.join(save_dir, 'cluster_center.png'), dpi=300, bbox_inches='tight')
+		plt.savefig(os.path.join(save_dir, f'{file_prefix}_center.png'), dpi=300, bbox_inches='tight')
 	if show:
 		plt.show()
 	plt.close()
@@ -744,7 +770,7 @@ def visualize_cluster_results(
 
 	plt.tight_layout()
 	if save_dir:
-		plt.savefig(os.path.join(save_dir, 'clusters_stacked.png'), dpi=300, bbox_inches='tight')
+		plt.savefig(os.path.join(save_dir, f'{file_prefix}_stacked.png'), dpi=300, bbox_inches='tight')
 	if show:
 		plt.show()
 	plt.close()
@@ -783,10 +809,11 @@ def visualize_cluster_results(
 	plt.grid(alpha=0.2, linestyle='--')
 	plt.tight_layout()
 	if save_dir:
-		plt.savefig(os.path.join(save_dir, 'tsne.png'), dpi=300, bbox_inches='tight')
+		plt.savefig(os.path.join(save_dir, f'{file_prefix}_tsne.png'), dpi=300, bbox_inches='tight')
 	if show:
 		plt.show()
 	plt.close()
+
 
 
 def cluster_result_quantification(
@@ -814,6 +841,8 @@ def cluster_result_quantification(
 	few_shot_n_percent: float = 50.0,
 	few_shot_threshold: int = 5,
 	return_metrics_payload: bool = False,
+	feature_model: Optional[str] = None,
+	segment_method: Optional[str] = None,
 ):
 	"""Unified entry for clustering quantification, metrics persistence and visualization."""
 	(
@@ -851,6 +880,8 @@ def cluster_result_quantification(
 
 	metrics = {
 		'clustering_method': str(cluster_method),
+		'feature_model': str(feature_model) if feature_model else 'unknown',
+		'segment_method': str(segment_method) if segment_method else 'unknown',
 		'clustering_hyperparameters': cluster_hyperparams if isinstance(cluster_hyperparams, dict) else {},
 		'distance_method_for_quantification': str(dist_method),
 		'data_source': {
@@ -901,7 +932,9 @@ def cluster_result_quantification(
 
 	if save_dir:
 		os.makedirs(save_dir, exist_ok=True)
-		metrics_path = os.path.join(save_dir, 'evaluation_metrics.json')
+		# naming: {cluster_method}_{feature_model}_{segment_method}.json
+		json_filename = f"{method_name}_{metrics['feature_model']}_{metrics['segment_method']}.json"
+		metrics_path = os.path.join(save_dir, json_filename)
 		with open(metrics_path, 'w', encoding='utf-8') as f:
 			json.dump(metrics, f, ensure_ascii=False, indent=2)
 
@@ -935,7 +968,12 @@ def cluster_result_quantification(
 			visualize_noise=visualize_noise,
 			language=language,
 			show=False,
+			cluster_method=cluster_method,
+			feature_model=feature_model,
+			segment_method=segment_method,
 		)
+
+
 
 	if return_metrics_payload:
 		return sil_score, db_score, ch_score, dbcv_score, metrics

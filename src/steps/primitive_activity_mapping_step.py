@@ -129,7 +129,7 @@ class PrimitiveActivityMappingStep(Step):
 			# If we have indices, we don't rely on timestamps from the array itself
 			# (especially since X.npy channel 0 is original signal, not timestamps)
 			if indices is not None and lengths is not None:
-				return {
+				record = {
 					'primitive_file_name': file_name,
 					'primitive_file_path': file_path,
 					'primitive_index': int(primitive_idx),
@@ -139,6 +139,9 @@ class PrimitiveActivityMappingStep(Step):
 					'start_timestamp': 0.0, # Placeholder, will be updated in matching
 					'end_timestamp': 0.0,   # Placeholder, will be updated in matching
 				}
+				if indices.shape[1] > 2:
+					record['cluster_label'] = int(indices[primitive_idx, 2])
+				return record
 
 			if ts_values is None or ts_values.ndim != 1 or ts_values.size == 0:
 				return None
@@ -204,8 +207,33 @@ class PrimitiveActivityMappingStep(Step):
 			try:
 				indices = np.load(indices_path)
 				print(f"[PrimitiveActivityMapping] Loaded indices.npy from {primitive_dir}")
+				
+				# GUIDELINES: Merge cluster labels if available (from TimeClusteringStep)
+				cluster_labels = None
+				if 'cluster_labels' in context:
+					cluster_labels = context['cluster_labels']
+				elif 'cluster_save_dir' in context:
+					cl_path = Path(context['cluster_save_dir']) / "cluster_labels.npy"
+					if cl_path.exists():
+						cluster_labels = np.load(cl_path)
+				
+				if cluster_labels is not None:
+					if len(cluster_labels) == len(indices):
+						# Add cluster labels as column 2
+						indices = np.column_stack([indices, cluster_labels])
+						print(f"[PrimitiveActivityMapping] Merged cluster labels into indices (new shape: {indices.shape})")
+						
+						# Save modified indices to current step's log dir as per user request
+						log_dir = self.get_log_dir(context)
+						os.makedirs(log_dir, exist_ok=True)
+						new_indices_path = os.path.join(log_dir, 'indices.npy')
+						np.save(new_indices_path, indices)
+						print(f"[PrimitiveActivityMapping] Saved modified indices.npy to {new_indices_path}")
+						context['primitive_indices_npy'] = new_indices_path
+					else:
+						print(f"[PrimitiveActivityMapping] Warning: cluster_labels size ({len(cluster_labels)}) mismatch with indices size ({len(indices)})")
 			except Exception as e:
-				print(f"[PrimitiveActivityMapping] Error loading indices.npy: {e}")
+				print(f"[PrimitiveActivityMapping] Error processing indices.npy: {e}")
 				
 		if lengths_path.exists():
 			try:
@@ -351,7 +379,7 @@ class PrimitiveActivityMappingStep(Step):
 					p_start, p_end = self._get_timestamps_from_csv(target_a['file_path'], start_idx, length)
 					
 					if p_start is not None and p_end is not None:
-						matches.append({
+						match_rec = {
 							'primitive_global_index': p['primitive_global_index'],
 							'primitive_file_name': p['primitive_file_name'],
 							'primitive_index': p['primitive_index'],
@@ -363,7 +391,10 @@ class PrimitiveActivityMappingStep(Step):
 							'activity_end_timestamp': target_a['end_timestamp'],
 							'match_type': 'index_match',
 							'tolerance_used': 0.0,
-						})
+						}
+						if 'cluster_label' in p:
+							match_rec['cluster_label'] = p['cluster_label']
+						matches.append(match_rec)
 						continue
 					else:
 						print(f"[PrimitiveActivityMapping][WARN] Index match failed for primitive {p['primitive_index']} in {p['primitive_file_name']} (timestamp extraction failed)")
@@ -383,8 +414,7 @@ class PrimitiveActivityMappingStep(Step):
 			]
 			strict_hit = choose_best_containing(strict_candidates)
 			if strict_hit is not None:
-				matches.append(
-					{
+				match_rec = {
 						'primitive_global_index': p['primitive_global_index'],
 						'primitive_file_name': p['primitive_file_name'],
 						'primitive_index': p['primitive_index'],
@@ -397,7 +427,9 @@ class PrimitiveActivityMappingStep(Step):
 						'match_type': 'contain',
 						'tolerance_used': 0.0,
 					}
-				)
+				if 'cluster_label' in p:
+					match_rec['cluster_label'] = p['cluster_label']
+				matches.append(match_rec)
 				continue
 
 			if tol > 0:
@@ -407,8 +439,7 @@ class PrimitiveActivityMappingStep(Step):
 				]
 				tolerant_hit = choose_best_containing(tolerant_candidates)
 				if tolerant_hit is not None:
-					matches.append(
-						{
+					match_rec = {
 							'primitive_global_index': p['primitive_global_index'],
 							'primitive_file_name': p['primitive_file_name'],
 							'primitive_index': p['primitive_index'],
@@ -421,7 +452,9 @@ class PrimitiveActivityMappingStep(Step):
 							'match_type': 'tolerant_contain',
 							'tolerance_used': tol,
 						}
-					)
+					if 'cluster_label' in p:
+						match_rec['cluster_label'] = p['cluster_label']
+					matches.append(match_rec)
 					continue
 
 			nearest_a, direction, gap = nearest_activity_and_direction(p_start, p_end)
@@ -441,8 +474,7 @@ class PrimitiveActivityMappingStep(Step):
 						f"direction={direction}, gap={gap}"
 					)
 
-			matches.append(
-				{
+			match_rec = {
 					'primitive_global_index': p['primitive_global_index'],
 					'primitive_file_name': p['primitive_file_name'],
 					'primitive_index': p['primitive_index'],
@@ -456,7 +488,9 @@ class PrimitiveActivityMappingStep(Step):
 					'tolerance_used': tol,
 					'mismatch_gap': gap,
 				}
-			)
+			if 'cluster_label' in p:
+				match_rec['cluster_label'] = p['cluster_label']
+			matches.append(match_rec)
 
 		return matches
 

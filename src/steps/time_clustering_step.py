@@ -447,7 +447,7 @@ class TimeClusteringStep(Step):
 
         return labels
 
-    def run_kmeans_scan(self, feature_matrix: np.ndarray, save_dir: str) -> tuple:
+    def run_kmeans_scan(self, feature_matrix: np.ndarray, save_dir: str, feature_model: str = None, segment_method: str = None) -> tuple:
         """Scan n_clusters in [min_cluster, max_cluster], save metrics JSON/plot, and return best labels."""
         min_k = int(self.min_cluster)
         max_k = int(self.max_cluster)
@@ -518,10 +518,13 @@ class TimeClusteringStep(Step):
             data_path=self.data_path,
             feature_path=self.feature_path,
             appliance_name=self.appliance_name,
+            feature_model=feature_model,
+            segment_method=segment_method,
         )
         return best_labels, best_k, scan_records, scan_payload
 
-    def run_dbscan_scan(self, dist_matrix: np.ndarray, feature_matrix: np.ndarray, save_dir: str) -> tuple:
+
+    def run_dbscan_scan(self, dist_matrix: np.ndarray, feature_matrix: np.ndarray, save_dir: str, feature_model: str = None, segment_method: str = None) -> tuple:
         """Scan eps in [min_eps, max_eps] with step eps_gap for DBSCAN while keeping min_pts fixed."""
         min_eps = float(self.min_eps)
         max_eps = float(self.max_eps)
@@ -605,13 +608,18 @@ class TimeClusteringStep(Step):
             data_path=self.data_path,
             feature_path=self.feature_path,
             appliance_name=self.appliance_name,
+            feature_model=feature_model,
+            segment_method=segment_method,
         )
         return best_labels, best_eps, scan_records, scan_payload
+
 
     def evaluate_clustering(self, labels: np.ndarray, dist_matrix: np.ndarray,
                            org_data: np.ndarray, feature_matrix: np.ndarray,
                            seq_len: np.ndarray, metrics_dir: str,
-                           enable_visualization: bool = False) -> dict:
+                           enable_visualization: bool = False,
+                           feature_model: str = None,
+                           segment_method: str = None) -> dict:
         """Thin wrapper: forward to clustering_utils and assemble a lightweight metrics dict."""
         metrics = {}
         metrics_payload = None
@@ -696,6 +704,8 @@ class TimeClusteringStep(Step):
                 few_shot_n_percent=self.few_shot_n_percent,
                 few_shot_threshold=self.few_shot_threshold,
                 return_metrics_payload=True,
+                feature_model=feature_model,
+                segment_method=segment_method,
             )
 
             if sil_score is not None:
@@ -726,11 +736,33 @@ class TimeClusteringStep(Step):
         return metrics
 
     def save_clustering_results(self, data_np: np.ndarray, seq_len: np.ndarray,
-                                 labels: np.ndarray, save_dir: str) -> str:
+                                 labels: np.ndarray, save_dir: str, indices: np.ndarray = None,
+                                 output_root: str = None) -> str:
         """Save clustering results including labels and visualizations using clustering_utils."""
         labels_save_path = os.path.join(save_dir, 'cluster_labels.npy')
         np.save(labels_save_path, labels)
         print(f"[TimeClustering] Labels saved to {labels_save_path}")
+
+        # If indices are provided, merge with labels and save as a 3-column indices.npy
+        if indices is not None:
+            if len(indices) == len(labels):
+                # Column 0: CSV index, Column 1: start index, Column 2: cluster label
+                merged_indices = np.column_stack((indices, labels))
+                
+                # Save to log directory
+                indices_log_path = os.path.join(save_dir, 'indices.npy')
+                np.save(indices_log_path, merged_indices)
+                print(f"[TimeClustering] Merged indices (3 columns) saved to {indices_log_path}")
+                
+                # Save to output directory if provided
+                if output_root:
+                    output_dir = os.path.join(output_root, 'output')
+                    os.makedirs(output_dir, exist_ok=True)
+                    indices_output_path = os.path.join(output_dir, 'indices.npy')
+                    np.save(indices_output_path, merged_indices)
+                    print(f"[TimeClustering] Merged indices (3 columns) saved to {indices_output_path}")
+            else:
+                print(f"[TimeClustering] Warning: indices length ({len(indices)}) does not match labels length ({len(labels)}). Skipping merge.")
 
         # Save cluster arrays
         self._save_cluster_arrays(data_np, seq_len, labels, save_dir)
@@ -790,6 +822,15 @@ class TimeClusteringStep(Step):
 
         data_np, feature_matrix, seq_len = self.load_data(context)
 
+        # Get model/method info from context for JSON naming and content
+        segment_method = context.get('segment_method', 'unknown')
+        feature_model = context.get('feature_extract_config', {}).get('model_name', 'unknown')
+
+        # Load indices from context if available
+        indices = None
+        if 'data' in context and isinstance(context['data'], dict):
+            indices = context['data'].get('indices', None)
+
         # Clean NaNs and Infs from features to prevent clustering failure (e.g., KMeans/DBSCAN)
         if feature_matrix is not None:
             # Check for non-finite values (NaN, Inf)
@@ -807,6 +848,8 @@ class TimeClusteringStep(Step):
                     data_np = data_np[valid_mask]
                 if seq_len is not None:
                     seq_len = seq_len[valid_mask]
+                if indices is not None:
+                    indices = indices[valid_mask]
 
         # Validate visualization/index selection early to fail fast with clear diagnostics.
         self._validate_col_index(data_np)
@@ -885,6 +928,8 @@ class TimeClusteringStep(Step):
                 dist_matrix=dist_matrix,
                 feature_matrix=scan_feature_matrix,
                 save_dir=save_dir,
+                feature_model=feature_model,
+                segment_method=segment_method,
             )
             self.selected_scan_eps = float(best_eps)
             self.eps = float(best_eps)
@@ -930,6 +975,8 @@ class TimeClusteringStep(Step):
             _labels, best_k, scan_records, scan_payload = self.run_kmeans_scan(
                 normalized_feature_matrix, 
                 save_dir,
+                feature_model=feature_model,
+                segment_method=segment_method,
             )
             self.kmeans_n_clusters = int(best_k)
 
@@ -960,10 +1007,12 @@ class TimeClusteringStep(Step):
             eval_feature_matrix,
             seq_len,
             metrics_dir=metrics_dir,
-            enable_visualization=False
+            enable_visualization=self.enable_visualization,
+            feature_model=feature_model,
+            segment_method=segment_method
         )
 
-        self.save_clustering_results(data_np, seq_len, labels, save_dir)
+        self.save_clustering_results(data_np, seq_len, labels, save_dir, indices=indices, output_root=output_root)
         
         # Save additional data for standalone visualization script
         np.save(os.path.join(save_dir, 'feature_matrix.npy'), eval_feature_matrix)
@@ -996,6 +1045,11 @@ class TimeClusteringStep(Step):
             print(f"[TimeClustering] Intermediate save triggered (step completed).")
 
         context['cluster_labels'] = labels
+        if indices is not None and len(indices) == len(labels):
+            if 'data' not in context:
+                context['data'] = {}
+            context['data']['indices'] = np.column_stack((indices, labels))
+        
         context['cluster_save_dir'] = save_dir
         context['n_clusters'] = len(set(labels)) - (1 if -1 in labels else 0)
         context['n_noise'] = int(np.sum(labels == -1))

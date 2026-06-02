@@ -93,29 +93,40 @@ steps:
 
 ## 4. 输出规则（重点）
 
+所有输出文件存放在 `log/{run_id}/TimeClustering_{suffix}/` 目录下。
+
 ### 4.1 普通模式（dbscan / kmeans / hdbscan）
 
-会保存聚类结果与评估产物：
+该模式会保存完整的聚类结果、中间数据以及评估产物，用于后续分析或可视化。
 
-- `cluster_labels.npy`
-- `Cluster_*.npy`
-- `evaluation_metrics.json`
-- 可视化图（center/stack/tsne 等，受 `visualization_specific.enabled` 控制）
+**核心结果文件：**
+- **`cluster_labels.npy`**: 长度为 N 的一维数组，存储每个输入片段的聚类标签（Cluster ID）。`-1` 表示噪声点。
+- **`Cluster_{id}.npy`**: 每个聚类一个文件（如 `Cluster_0.npy`），存储属于该类别的所有原始片段波形数据（已 Padding 齐平）。
+- **`{cluster_method}_{feature_model}_{segment_method}.json`**: 详细的聚类评估报告，包含超参数、类别分布、各项评分等。
+
+**中间数据文件（供离线可视化使用）：**
+- **`org_data.npy`**: 原始输入的片段波形数据。
+- **`feature_matrix.npy`**: 用于聚类的特征矩阵（降维或提取后的向量）。
+- **`seq_len.npy`**: 每个片段的原始有效长度。
+- **`{segment_method}_{feature_model}.npy`**: 包含三个核心指标的简易数组：`[Silhouette, Davies-Bouldin, Calinski-Harabasz]`。
+
+**可视化产物（受 `visualization_specific.enabled` 控制）：**
+- **`{cluster_method}_{feature_model}_{segment_method}_center.png`**: 聚类中心波形图。
+- **`{cluster_method}_{feature_model}_{segment_method}_stacked.png`**: 类别内的波形堆叠图。
+- **`{cluster_method}_{feature_model}_{segment_method}_tsne.png`**: 聚类结果的 t-SNE 二维投影散点图。
+- **`cluster_{id}/` 文件夹**: 包含该类别内前 N 个样本的独立波形图片（如 `item_1.png`）。
 
 ### 4.2 扫描模式（dbscan-scan / kmeans-scan）
 
-只输出扫描结果，不保存“最佳聚类结果”文件。
+扫描模式旨在搜索最佳超参数，因此**不会**保存具体的 `Cluster_*.npy` 分类结果。
 
-- `dbscan-scan`：
-  - `dbscan_scan_metrics.json`
-  - `dbscan_scan_metrics.png`
-- `kmeans-scan`：
-  - `kmeans_scan_metrics.json`
-  - `kmeans_scan_metrics.png`
+- **扫描报告**：
+  - **`{cluster_method}_{feature_model}_{segment_method}.json`**: 记录扫描过程中每个参数（如 k 或 eps）对应的评估指标。
+  - **`{cluster_method}_{feature_model}_{segment_method}.png`**: 扫描指标的可视化折线图，用于辅助观察拐点。
 
-即不会落 `cluster_labels.npy` / `Cluster_*.npy`。
+---
 
-## 5. 指标与 JSON
+## 5. 指标与 JSON 字段说明
 
 `evaluation_metrics.json`（普通模式）中包含：
 
