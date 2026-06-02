@@ -9,28 +9,28 @@
 #SBATCH -e /home/scnu2023024258/data/code/PSLG-NILM/slurm_log/job-%x-%j.err
 #SBATCH --time=24:00:00
 
-# --- 1. 作业开始，打印基本信息 ---
-echo "Job started on: $(date)"
-echo "Job ID: $SLURM_JOB_ID"
-echo "Running on node: $(hostname)"
-echo "Allocated GPUs: $CUDA_VISIBLE_DEVICES"
+# --- 1. 环境准备 ---
+# 不使用 module purge，避免误删驱动路径
+module load cuda-toolkit/12.1 
 
-# --- 2. 创建日志和输出目录 ---
-mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/slurm_log
-mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/output
-mkdir -p /home/scnu2023024258/data/code/PSLG-NILM/log
-echo "Created necessary directories"
+export PYTHONNOUSERSITE=1 # 禁止使用用户目录下的 Python 包
+export PYTHONPATH=""      # 清空 Python 路径
+export PYTHONUNBUFFERED=1 # 实时打印日志
 
-# --- 3. 设置软件环境 ---
-module purge
-echo "Environment purged."
-module load miniconda3/latest cuda-toolkit/12.1
-echo "Modules loaded."
-
-# --- 4. 激活 Conda 环境 ---
-source $(conda info --base)/bin/activate
+# --- 2. 激活 Conda 环境 ---
+CONDA_BASE=$(conda info --base)
+source "$CONDA_BASE/bin/activate"
 conda activate PSLG-NILM
-echo "Conda environment activated: $CONDA_DEFAULT_ENV"
+
+# --- 3. 修复动态库搜索路径 ---
+# 优先级：Conda NVIDIA库 > Conda基础库 > 系统路径(含驱动)
+export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:$CONDA_PREFIX/lib/python3.12/site-packages/nvidia/cudnn/lib:$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
+
+# --- 4. 诊断信息 ---
+echo "Job started on: $(date)"
+echo "Running on node: $(hostname)"
+echo "Allocated GPU: $CUDA_VISIBLE_DEVICES"
+nvidia-smi
 
 # --- 5. 执行循环运行逻辑 ---
 cd /home/scnu2023024258/data/code/PSLG-NILM
@@ -50,8 +50,7 @@ for METHOD in "${METHODS[@]}"; do
         continue
     fi
     
-    # 使用 sed 修改 segment_method (匹配 line 26 附近的格式)
-    # 替换 segment_method: "..." 为当前方法
+    # 使用 sed 修改 segment_method
     if ! sed -i "s/segment_method: \".*\"/segment_method: \"$METHOD\"/" "$TEMP_CONFIG"; then
         echo "Error: Failed to update config for $METHOD. Skipping..."
         continue
@@ -68,9 +67,6 @@ for METHOD in "${METHODS[@]}"; do
         echo "Workflow for $METHOD failed! Skipping this model."
         continue
     fi
-    
-    # 清理临时配置文件 (可选，若需保留请注释掉)
-    # rm "$TEMP_CONFIG"
     
     echo "Finished $METHOD run."
     echo ""
